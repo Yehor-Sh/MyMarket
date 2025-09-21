@@ -287,9 +287,10 @@
     .control-bar {
       display: flex;
       justify-content: flex-end;
+      gap: 12px;
     }
 
-    .action-btn {
+    .control-action {
       padding: 14px 24px;
       border-radius: 999px;
       border: 1px solid rgba(255, 255, 255, 0.08);
@@ -302,8 +303,8 @@
       transition: transform var(--transition), background var(--transition), border-color var(--transition);
     }
 
-    .action-btn:hover,
-    .action-btn:focus-visible {
+    .control-action:hover,
+    .control-action:focus-visible {
       transform: translateY(-2px);
       border-color: rgba(255, 255, 255, 0.18);
       outline: none;
@@ -343,12 +344,15 @@
       transition: transform var(--transition), opacity var(--transition);
       z-index: 11;
       backdrop-filter: blur(18px);
+      max-height: calc(100vh - 100px);
+      overflow-y: hidden;
     }
 
     .strategy-panel.is-open {
       transform: translateY(0) scale(1);
       opacity: 1;
       pointer-events: auto;
+      overflow-y: auto;
     }
 
     .panel-header {
@@ -441,6 +445,8 @@
     .panel-actions {
       display: flex;
       justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 10px;
     }
 
     .panel-action {
@@ -454,6 +460,8 @@
       font-size: 0.72rem;
       cursor: pointer;
       transition: transform var(--transition), border-color var(--transition), background var(--transition);
+      min-width: 160px;
+      text-align: center;
     }
 
     .panel-action:hover,
@@ -462,6 +470,150 @@
       border-color: rgba(255, 255, 255, 0.24);
       background: rgba(255, 255, 255, 0.1);
       outline: none;
+    }
+
+    .panel-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .panel-subtitle {
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .health-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .health-item {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .health-item__head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .health-item__name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .health-item__meta {
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .health-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .health-badge--ok {
+      background: rgba(22, 199, 132, 0.35);
+      border: 1px solid rgba(22, 199, 132, 0.55);
+    }
+
+    .health-badge--error {
+      background: rgba(255, 77, 103, 0.35);
+      border: 1px solid rgba(255, 77, 103, 0.55);
+    }
+
+    .health-badge--running {
+      background: rgba(59, 130, 246, 0.35);
+      border: 1px solid rgba(59, 130, 246, 0.55);
+    }
+
+    .health-badge--idle {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--text-secondary);
+    }
+
+    .health-badge--offline {
+      background: rgba(255, 211, 99, 0.35);
+      border: 1px solid rgba(255, 211, 99, 0.55);
+      color: #1f1f1f;
+    }
+
+    .health-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 12px;
+      font-size: 0.78rem;
+    }
+
+    .health-stats div {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .health-stats dt {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+    }
+
+    .health-stats dd {
+      margin: 0;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .health-error {
+      color: var(--danger);
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+    }
+
+    .health-message {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.06em;
+      padding: 8px 0;
+    }
+
+    .health-message--error {
+      color: var(--danger);
+    }
+
+    .health-empty {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.06em;
+      padding: 12px 0;
     }
 
     @media (max-width: 768px) {
@@ -607,7 +759,7 @@
     </main>
 
     <footer class="control-bar">
-      <button class="action-btn" type="button" onclick="closeAllTrades()">Закрыть все сделки</button>
+      <button class="control-action" type="button" onclick="closeAllTrades()">Закрыть все сделки</button>
     </footer>
   </div>
 
@@ -619,7 +771,14 @@
     </div>
     <p class="panel-note">Выберите стратегию, чтобы отобразить только её сделки. "Все стратегии" возвращает полный список.</p>
     <div class="strategy-list" id="strategyList"></div>
+    <section class="panel-section">
+      <div class="panel-subtitle">Состояние модулей</div>
+      <div class="health-list" id="moduleHealth" aria-live="polite">
+        <div class="health-empty">Нажмите «Проверить здоровье», чтобы получить данные.</div>
+      </div>
+    </section>
     <div class="panel-actions">
+      <button class="panel-action" type="button" onclick="requestModuleHealth(true)">Проверить здоровье</button>
       <button class="panel-action" type="button" onclick="clearCache()">Очистить кеш</button>
     </div>
   </aside>
@@ -629,6 +788,24 @@
   let tradesData = { active: [], closed: [] };
   let selectedStrategy = STRATEGY_ALL;
   let socket = null;
+  const HEALTH_STATUS_LABELS = {
+    ok: 'OK',
+    error: 'Ошибка',
+    running: 'Выполняется',
+    idle: 'Ожидание',
+    offline: 'Отключено'
+  };
+  const HEALTH_STATUS_CLASS = {
+    ok: 'ok',
+    error: 'error',
+    running: 'running',
+    idle: 'idle',
+    offline: 'offline'
+  };
+  let moduleHealth = [];
+  let moduleHealthLoading = false;
+  let moduleHealthError = null;
+  let lastHealthFetch = 0;
 
   function nfix(value, digits = 4) {
     const num = Number(value);
@@ -643,6 +820,11 @@
       return date.toISOString().replace('T', ' ').substring(0, 16);
     }
     return String(value).replace('T', ' ').substring(0, 16);
+  }
+
+  function formatHealthTime(value) {
+    const formatted = formatTime(value);
+    return formatted === '-' ? '—' : formatted;
   }
 
   function escapeHtml(value) {
@@ -697,6 +879,119 @@
     return result;
   }
 
+  function renderModuleHealth() {
+    const container = document.getElementById('moduleHealth');
+    if (!container) return;
+
+    if (moduleHealthLoading) {
+      container.innerHTML = '<div class="health-message">Загрузка состояния…</div>';
+      return;
+    }
+
+    if (moduleHealthError) {
+      container.innerHTML = `<div class="health-message health-message--error">${escapeHtml(moduleHealthError)}</div>`;
+      return;
+    }
+
+    if (!Array.isArray(moduleHealth) || moduleHealth.length === 0) {
+      container.innerHTML = '<div class="health-empty">Нажмите «Проверить здоровье», чтобы получить данные.</div>';
+      return;
+    }
+
+    const html = moduleHealth
+      .map((item) => {
+        const status = String(item.status || 'idle').toLowerCase();
+        const statusLabel = HEALTH_STATUS_LABELS[status] || status.toUpperCase();
+        const statusClass = HEALTH_STATUS_CLASS[status] || 'idle';
+        const lastRun = formatHealthTime(item.last_run);
+        const lastSuccess = formatHealthTime(item.last_success);
+        const durationValue = Number(item.last_duration);
+        const duration = Number.isFinite(durationValue) ? `${durationValue.toFixed(2)}с` : '—';
+        const errorCountValue = Number(item.error_count);
+        const errorCount = Number.isFinite(errorCountValue) ? errorCountValue : 0;
+        const lastSignalsValue = Number(item.last_signal_count);
+        const totalSignalsValue = Number(item.total_signals);
+        const lastSignals = Number.isFinite(lastSignalsValue) ? lastSignalsValue : 0;
+        const totalSignals = Number.isFinite(totalSignalsValue) ? totalSignalsValue : 0;
+        const signalsSummary = `${lastSignals}/${totalSignals}`;
+        const metaParts = [];
+        if (item.abbreviation) metaParts.push(String(item.abbreviation).toUpperCase());
+        if (item.interval) metaParts.push(`интервал ${item.interval}`);
+        if (item.lookback !== undefined && item.lookback !== null && item.lookback !== '') {
+          metaParts.push(`баров ${item.lookback}`);
+        }
+        const metaContent = metaParts.length
+          ? metaParts.map((part) => safeText(part)).join(' • ')
+          : '—';
+        const errorText = item.last_error
+          ? `<div class="health-error">${escapeHtml(item.last_error)}</div>`
+          : '';
+        const workerDown = item.is_alive === false
+          ? '<div class="health-error">Поток неактивен</div>'
+          : '';
+
+        return `
+          <article class="health-item">
+            <header class="health-item__head">
+              <div>
+                <div class="health-item__name">${safeText(item.name || item.abbreviation || 'Стратегия')}</div>
+                <div class="health-item__meta">${metaContent}</div>
+              </div>
+              <span class="health-badge health-badge--${statusClass}">${safeText(statusLabel)}</span>
+            </header>
+            <dl class="health-stats">
+              <div><dt>Запуск</dt><dd>${safeText(lastRun)}</dd></div>
+              <div><dt>Успешно</dt><dd>${safeText(lastSuccess)}</dd></div>
+              <div><dt>Цикл</dt><dd>${safeText(duration)}</dd></div>
+              <div><dt>Сигналы</dt><dd>${safeText(signalsSummary)}</dd></div>
+              <div><dt>Ошибки</dt><dd>${safeText(errorCount)}</dd></div>
+            </dl>
+            ${errorText}${workerDown}
+          </article>
+        `;
+      })
+      .join('');
+
+    container.innerHTML = html;
+  }
+
+  function requestModuleHealth(force = false) {
+    if (!socket || !socket.connected) {
+      if (force) alert('Нет соединения с сервером');
+      return;
+    }
+    if (moduleHealthLoading && !force) return;
+
+    const now = Date.now();
+    if (!force && moduleHealth.length && now - lastHealthFetch < 15000) {
+      return;
+    }
+
+    moduleHealthLoading = true;
+    moduleHealthError = null;
+    renderModuleHealth();
+
+    socket
+      .timeout(5000)
+      .emit('request_module_health', {}, (err, response) => {
+        moduleHealthLoading = false;
+        if (err) {
+          moduleHealthError = 'Сервер не ответил вовремя';
+          renderModuleHealth();
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          moduleHealthError = 'Не удалось получить состояние модулей';
+          renderModuleHealth();
+          return;
+        }
+        moduleHealth = Array.isArray(response.health) ? response.health : [];
+        moduleHealthError = null;
+        lastHealthFetch = Date.now();
+        renderModuleHealth();
+      });
+  }
+
   function handleTradesPayload(payload) {
     tradesData = normalizeTradesData(payload);
     updateUI();
@@ -712,11 +1007,19 @@
 
     socket.on('connect', () => {
       console.info('[WS] connected');
+      moduleHealthError = null;
+      moduleHealthLoading = false;
+      lastHealthFetch = 0;
+      renderModuleHealth();
       requestTradesState();
+      requestModuleHealth();
     });
 
     socket.on('disconnect', (reason) => {
       console.warn('[WS] disconnected:', reason);
+      moduleHealthLoading = false;
+      moduleHealthError = 'Нет соединения с сервером';
+      renderModuleHealth();
     });
 
     socket.on('connect_error', (error) => {
@@ -908,6 +1211,8 @@
     document.getElementById('strategyPanel').classList.add('is-open');
     document.getElementById('strategyOverlay').classList.add('is-active');
     document.getElementById('strategyToggle').setAttribute('aria-expanded', 'true');
+    renderModuleHealth();
+    requestModuleHealth();
   }
 
   function closeStrategyPanel() {
@@ -946,6 +1251,7 @@
       if (event.key === 'Escape') closeStrategyPanel();
     });
 
+    renderModuleHealth();
     updateUI();
   });
 

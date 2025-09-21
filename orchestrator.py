@@ -20,8 +20,14 @@ from module_worker import ModuleWorker
 from modules.strategy_breakout import BreakoutHighLowStrategy
 from modules.strategy_engulf import EngulfingStrategy
 from modules.strategy_inside import InsideBarBreakoutStrategy
+from modules.strategy_mean_reversion import MeanReversionStrategy
+from modules.strategy_momentum_factor import MomentumFactorStrategy
+from modules.strategy_pattern_recognition import PatternRecognitionStrategy
 from modules.strategy_pinbar import PinBarStrategy
+from modules.strategy_range_breakout import RangeBreakoutStrategy
 from modules.strategy_trend import EMABounceStrategy
+from modules.strategy_volume_trend import VolumeWeightedTrendStrategy
+from modules.strategy_volatility_breakout import VolatilityBreakoutStrategy
 
 
 @dataclass
@@ -207,6 +213,12 @@ class Orchestrator:
             InsideBarBreakoutStrategy(self.client),
             BreakoutHighLowStrategy(self.client),
             EMABounceStrategy(self.client),
+            RangeBreakoutStrategy(self.client),
+            VolatilityBreakoutStrategy(self.client),
+            MeanReversionStrategy(self.client),
+            VolumeWeightedTrendStrategy(self.client),
+            MomentumFactorStrategy(self.client),
+            PatternRecognitionStrategy(self.client),
         ]
         return modules
 

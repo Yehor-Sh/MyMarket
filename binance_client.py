@@ -28,12 +28,15 @@ import json
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import requests
+import websocket
 
 BINANCE_REST_ENDPOINT = "https://api.binance.com"
+BINANCE_WS_ENDPOINT = "wss://stream.binance.com:9443/ws"
 
 _logger = logging.getLogger(__name__)
 
@@ -152,6 +155,15 @@ class BinanceClient:
         self._stop_event = threading.Event()
         self._ticker_thread: Optional[threading.Thread] = None
         self._liquidity_thread: Optional[threading.Thread] = None
+        self._ws_stop_event = threading.Event()
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_connected = threading.Event()
+        self._ws_lock = threading.RLock()
+        self._ws_app: Optional[websocket.WebSocketApp] = None
+        self._ws_streams: Set[str] = set()
+        self._ws_pending: Deque[str] = deque()
+        self._ws_pending_set: Set[str] = set()
+        self._ws_request_id = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -165,6 +177,7 @@ class BinanceClient:
         """
 
         self._stop_event.clear()
+        self._ws_stop_event.clear()
         if not (self._ticker_thread and self._ticker_thread.is_alive()):
             self._ticker_thread = threading.Thread(
                 target=self._ticker_loop,
@@ -181,21 +194,61 @@ class BinanceClient:
             )
             self._liquidity_thread.start()
 
+        if not (self._ws_thread and self._ws_thread.is_alive()):
+            self._ws_thread = threading.Thread(
+                target=self._ws_loop,
+                name="BinanceWebSocketThread",
+                daemon=True,
+            )
+            self._ws_thread.start()
+
     def stop(self) -> None:
         """Stop all background threads and wait for them to terminate."""
 
         self._stop_event.set()
+        self._ws_stop_event.set()
         if self._ticker_thread and self._ticker_thread.is_alive():
             self._ticker_thread.join(timeout=2.0)
         if self._liquidity_thread and self._liquidity_thread.is_alive():
             self._liquidity_thread.join(timeout=2.0)
+        with self._ws_lock:
+            ws_app = self._ws_app
+        if ws_app is not None:
+            try:
+                ws_app.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+        if self._ws_thread and self._ws_thread.is_alive():
+            self._ws_thread.join(timeout=2.0)
+        self._ws_connected.clear()
+        with self._ws_lock:
+            self._ws_pending.clear()
+            self._ws_pending_set.clear()
+
+    def clear_caches(self) -> None:
+        """Clear local price, kline and liquidity caches."""
+
+        with self._price_lock:
+            self._price_cache.clear()
+        with self._klines_lock:
+            self._klines_cache.clear()
+        with self._liquidity_lock:
+            self._liquid_pairs.clear()
+            self._last_liquidity_refresh = 0.0
 
     # ------------------------------- Price handling -------------------
     def subscribe_ticker(self, symbols: Iterable[str]) -> None:
         """Subscribe the ticker updater to additional symbols."""
 
+        normalized = {symbol.upper() for symbol in symbols if symbol}
+        if not normalized:
+            return
         with self._subscription_lock:
-            self._subscribed_symbols.update(symbols)
+            new_symbols = normalized - self._subscribed_symbols
+            if not new_symbols:
+                return
+            self._subscribed_symbols.update(new_symbols)
+        self._queue_ws_subscription(new_symbols)
 
     def add_price_listener(self, callback: Callable[[str, float], None]) -> None:
         """Register a callback invoked whenever a ticker update is available."""
@@ -261,17 +314,14 @@ class BinanceClient:
                 if self._stop_event.wait(self._ticker_interval):
                     break
                 continue
+            if self._ws_connected.is_set():
+                if self._stop_event.wait(self._ticker_interval):
+                    break
+                continue
             try:
                 data = self._fetch_ticker_prices(symbols)
-                callbacks = self._get_price_callbacks()
                 for symbol, price in data.items():
-                    with self._price_lock:
-                        self._price_cache[symbol] = price
-                    for callback in callbacks:
-                        try:
-                            callback(symbol, price)
-                        except Exception:  # pragma: no cover - defensive
-                            _logger.exception("price listener failed for %s", symbol)
+                    self._publish_price_update(symbol, price)
             except Exception:  # pragma: no cover - defensive
                 _logger.exception("ticker refresh failed")
             if self._stop_event.wait(self._ticker_interval):
@@ -296,6 +346,17 @@ class BinanceClient:
         with self._callbacks_lock:
             return list(self._price_callbacks)
 
+    def _publish_price_update(self, symbol: str, price: float) -> None:
+        symbol = symbol.upper()
+        with self._price_lock:
+            self._price_cache[symbol] = price
+        callbacks = self._get_price_callbacks()
+        for callback in callbacks:
+            try:
+                callback(symbol, price)
+            except Exception:  # pragma: no cover - defensive
+                _logger.exception("price listener failed for %s", symbol)
+
     def _fetch_ticker_prices(self, symbols: Iterable[str]) -> Dict[str, float]:
         payload: Dict[str, float] = {}
         symbols_list = [s.upper() for s in symbols]
@@ -315,6 +376,125 @@ class BinanceClient:
             price = float(entry["price"])
             payload[symbol] = price
         return payload
+
+    def _queue_ws_subscription(self, symbols: Iterable[str]) -> None:
+        if not symbols:
+            return
+        with self._ws_lock:
+            added = False
+            for symbol in symbols:
+                stream = f"{symbol.lower()}@miniTicker"
+                if stream not in self._ws_streams:
+                    self._ws_streams.add(stream)
+                    self._enqueue_pending_locked(stream)
+                    added = True
+        if added:
+            self._drain_ws_pending()
+
+    def _enqueue_pending_locked(self, stream: str) -> None:
+        if stream not in self._ws_pending_set:
+            self._ws_pending.append(stream)
+            self._ws_pending_set.add(stream)
+
+    def _next_ws_id_locked(self) -> int:
+        self._ws_request_id += 1
+        return self._ws_request_id
+
+    def _drain_ws_pending(self) -> None:
+        while True:
+            with self._ws_lock:
+                if not (
+                    self._ws_connected.is_set()
+                    and self._ws_app is not None
+                    and self._ws_pending
+                ):
+                    return
+                stream = self._ws_pending.popleft()
+                self._ws_pending_set.discard(stream)
+                ws_app = self._ws_app
+                request_id = self._next_ws_id_locked()
+            payload = json.dumps(
+                {"method": "SUBSCRIBE", "params": [stream], "id": request_id}
+            )
+            try:
+                ws_app.send(payload)
+            except Exception:  # pragma: no cover - defensive
+                with self._ws_lock:
+                    self._enqueue_pending_locked(stream)
+                self._ws_connected.clear()
+                try:
+                    ws_app.close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                return
+
+    def _ws_loop(self) -> None:
+        while not self._ws_stop_event.is_set():
+            try:
+                ws_app = websocket.WebSocketApp(
+                    BINANCE_WS_ENDPOINT,
+                    on_open=self._on_ws_open,
+                    on_close=self._on_ws_close,
+                    on_error=self._on_ws_error,
+                    on_message=self._on_ws_message,
+                )
+                with self._ws_lock:
+                    self._ws_app = ws_app
+                ws_app.run_forever(ping_interval=20, ping_timeout=10)
+            except Exception:  # pragma: no cover - defensive
+                _logger.exception("binance websocket loop failed")
+            finally:
+                with self._ws_lock:
+                    self._ws_app = None
+                self._ws_connected.clear()
+            if self._ws_stop_event.wait(5.0):
+                break
+
+    def _on_ws_open(self, ws: websocket.WebSocketApp) -> None:
+        self._ws_connected.set()
+        with self._ws_lock:
+            for stream in self._ws_streams:
+                self._enqueue_pending_locked(stream)
+        self._drain_ws_pending()
+
+    def _on_ws_close(
+        self,
+        ws: websocket.WebSocketApp,
+        close_status_code: Optional[int],
+        close_msg: Optional[str],
+    ) -> None:
+        self._ws_connected.clear()
+
+    def _on_ws_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
+        self._ws_connected.clear()
+        _logger.warning("binance websocket error: %s", error)
+
+    def _on_ws_message(self, ws: websocket.WebSocketApp, message: str) -> None:
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:  # pragma: no cover - defensive
+            return
+        if not isinstance(payload, dict):
+            return
+        if "result" in payload:
+            return
+        if "stream" in payload:
+            data = payload.get("data")
+            if isinstance(data, dict):
+                self._process_ws_payload(data)
+            return
+        self._process_ws_payload(payload)
+
+    def _process_ws_payload(self, payload: Dict[str, object]) -> None:
+        symbol = payload.get("s") or payload.get("symbol")
+        price_value = payload.get("c") or payload.get("p") or payload.get("price")
+        if not symbol or price_value is None:
+            return
+        try:
+            price = float(price_value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return
+        self._publish_price_update(str(symbol), price)
 
     def _refresh_liquid_pairs(self) -> None:
         response = self._session.get(

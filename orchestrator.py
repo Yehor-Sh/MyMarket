@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from flask import Flask, jsonify, send_from_directory
-from flask_socketio import SocketIO
+from flask import Flask, send_from_directory
+from flask_socketio import SocketIO, emit
 
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
@@ -169,6 +169,7 @@ class Orchestrator:
 
         self.client.add_price_listener(self._handle_price_update)
         self._register_routes()
+        self._register_socket_handlers()
 
     # ------------------------------------------------------------------
     def _register_routes(self) -> None:
@@ -178,9 +179,25 @@ class Orchestrator:
         def index():
             return send_from_directory(static_dir, "client.html")
 
-        @self.app.route("/api/ui_trades")
-        def api_ui_trades():
-            return jsonify(self._serialize_state())
+    # ------------------------------------------------------------------
+    def _register_socket_handlers(self) -> None:
+        @self.socketio.on("connect")
+        def _on_connect():
+            emit("trades", self._serialize_state())
+
+        @self.socketio.on("request_state")
+        def _on_request_state():
+            emit("trades", self._serialize_state())
+
+        @self.socketio.on("close_all_trades")
+        def _on_close_all_trades():
+            count = self.close_all_trades()
+            return {"status": "ok", "count": count}
+
+        @self.socketio.on("clear_cache")
+        def _on_clear_cache():
+            self.client.clear_caches()
+            return {"status": "ok"}
 
     # ------------------------------------------------------------------
     def _build_modules(self) -> List[ModuleBase]:
@@ -340,6 +357,35 @@ class Orchestrator:
     def _broadcast_state(self) -> None:
         payload = self._serialize_state()
         self.socketio.emit("trades", payload)
+
+    # ------------------------------------------------------------------
+    def close_all_trades(self) -> int:
+        with self._lock:
+            trades = list(self.active_trades.values())
+        if not trades:
+            return 0
+
+        closed_payloads: List[Dict[str, object]] = []
+        for trade in trades:
+            price = trade.current_price
+            if price is None:
+                price = self.client.get_price(trade.symbol)
+            if price is None:
+                candles = self.client.fetch_klines(trade.symbol, "1m", 1)
+                if candles:
+                    price = candles[-1].close
+            if price is None:
+                price = trade.entry_price
+            trade._close(price)
+        with self._lock:
+            for trade in trades:
+                closed_payloads.append(self._finalize_trade(trade))
+
+        if closed_payloads:
+            for payload in closed_payloads:
+                self.socketio.emit("trade_closed", payload)
+            self._broadcast_state()
+        return len(closed_payloads)
 
     # ------------------------------------------------------------------
     def _serialize_state(self) -> Dict[str, object]:

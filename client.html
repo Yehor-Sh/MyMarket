@@ -628,6 +628,7 @@
   const STRATEGY_ALL = '__all__';
   let tradesData = { active: [], closed: [] };
   let selectedStrategy = STRATEGY_ALL;
+  let socket = null;
 
   function nfix(value, digits = 4) {
     const num = Number(value);
@@ -696,16 +697,39 @@
     return result;
   }
 
-  async function fetchUiTrades() {
-    try {
-      const response = await fetch('/api/ui_trades');
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json();
-      tradesData = normalizeTradesData(data);
-      updateUI();
-    } catch (error) {
-      console.warn('[UI] fetch /api/ui_trades failed:', error.message);
-    }
+  function handleTradesPayload(payload) {
+    tradesData = normalizeTradesData(payload);
+    updateUI();
+  }
+
+  function requestTradesState() {
+    if (!socket || !socket.connected) return;
+    socket.emit('request_state');
+  }
+
+  function setupSocket() {
+    socket = io({ transports: ['websocket'], autoConnect: true });
+
+    socket.on('connect', () => {
+      console.info('[WS] connected');
+      requestTradesState();
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('[WS] disconnected:', reason);
+    });
+
+    socket.on('connect_error', (error) => {
+      console.warn('[WS] connect error:', error.message || error);
+    });
+
+    socket.on('trades', handleTradesPayload);
+  }
+
+  function ensureSocketConnected() {
+    if (socket && socket.connected) return true;
+    alert('Нет соединения с сервером');
+    return false;
   }
 
   function getFilteredTrades() {
@@ -911,8 +935,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    fetchUiTrades();
-    setInterval(fetchUiTrades, 2000);
+    setupSocket();
 
     document.getElementById('strategyToggle').addEventListener('click', toggleStrategyPanel);
     document.getElementById('strategyClose').addEventListener('click', closeStrategyPanel);
@@ -926,32 +949,42 @@
     updateUI();
   });
 
-  async function closeAllTrades() {
-    try {
-      const response = await fetch('/api/close_all', {
-        method: 'POST'
+  function closeAllTrades() {
+    if (!ensureSocketConnected()) return;
+
+    socket
+      .timeout(5000)
+      .emit('close_all_trades', {}, (err, response) => {
+        if (err) {
+          alert('Сервер не ответил вовремя');
+          return;
+        }
+        if (response && response.status === 'ok') {
+          alert(`Закрыто ${response.count} сделок`);
+          requestTradesState();
+        } else {
+          alert('Ошибка при закрытии сделок');
+        }
       });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json();
-      alert(`Закрыто ${data.count} сделок`);
-      fetchUiTrades();
-    } catch (error) {
-      alert('Ошибка при закрытии сделок');
-    }
   }
 
-  async function clearCache() {
-    try {
-      const response = await fetch('/api/clear_cache', {
-        method: 'POST'
+  function clearCache() {
+    if (!ensureSocketConnected()) return;
+
+    socket
+      .timeout(5000)
+      .emit('clear_cache', {}, (err, response) => {
+        if (err) {
+          alert('Сервер не ответил вовремя');
+          return;
+        }
+        if (response && response.status === 'ok') {
+          alert('Кеш очищен');
+          requestTradesState();
+        } else {
+          alert('Ошибка при очистке кеша');
+        }
       });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      await response.json();
-      alert('Кеш очищен');
-      fetchUiTrades();
-    } catch (error) {
-      alert('Ошибка при очистке кеша');
-    }
   }
   </script>
 </body>

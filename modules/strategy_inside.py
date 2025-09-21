@@ -15,16 +15,16 @@ from .indicators import ema
 class InsideBarBreakoutStrategy(ModuleBase):
     """Identify inside bar breakouts confirmed by trend and volume."""
 
-    def __init__(self, client, *, interval: str = "1h", lookback: int = 80) -> None:
+    def __init__(self, client, *, interval: str = "1h", lookback: int = 100) -> None:
         super().__init__(
             client,
             name="InsideBarBreakout",
             abbreviation="INS",
             interval=interval,
-            lookback=max(lookback, 60),
+            lookback=max(lookback, 80),
         )
         self._ema_period = 20
-        self._volume_window = 10
+        self._volume_window = 20
 
     def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
         if len(candles) < 3:
@@ -58,7 +58,7 @@ class InsideBarBreakoutStrategy(ModuleBase):
 
         trend_up = ema_values[-1] > ema_values[-2]
         trend_down = ema_values[-1] < ema_values[-2]
-        volume_ok = breakout.volume > avg_volume
+        volume_ok = breakout.volume >= avg_volume * 1.5
 
         if breakout.close > mother.high and trend_up and volume_ok:
             signals.append(
@@ -66,7 +66,13 @@ class InsideBarBreakoutStrategy(ModuleBase):
                     symbol,
                     "LONG",
                     confidence=1.05,
-                    metadata={**metadata, "direction": "up"},
+                    metadata={
+                        **metadata,
+                        "direction": "up",
+                        "ema_current": ema_values[-1],
+                        "ema_previous": ema_values[-2],
+                        "volume_multiple": breakout.volume / avg_volume if avg_volume else math.nan,
+                    },
                 )
             )
         if breakout.close < mother.low and trend_down and volume_ok:
@@ -75,7 +81,13 @@ class InsideBarBreakoutStrategy(ModuleBase):
                     symbol,
                     "SHORT",
                     confidence=1.05,
-                    metadata={**metadata, "direction": "down"},
+                    metadata={
+                        **metadata,
+                        "direction": "down",
+                        "ema_current": ema_values[-1],
+                        "ema_previous": ema_values[-2],
+                        "volume_multiple": breakout.volume / avg_volume if avg_volume else math.nan,
+                    },
                 )
             )
 

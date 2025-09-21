@@ -1106,17 +1106,60 @@
     el.setAttribute('title', label);
   }
 
+  function ensureNoDataMessage(table, columns, message) {
+    if (!table) return;
+
+    const existing = table.querySelector('td.no-data');
+    if (existing) {
+      if (existing.colSpan !== columns) {
+        existing.colSpan = columns;
+      }
+      if (existing.textContent !== message) {
+        existing.textContent = message;
+      }
+      return;
+    }
+
+    while (table.rows.length > 0) {
+      table.deleteRow(table.rows.length - 1);
+    }
+
+    const row = table.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = columns;
+    cell.className = 'no-data';
+    cell.textContent = message;
+  }
+
+  function clearNoDataMessage(table) {
+    if (!table) return;
+
+    const noDataCell = table.querySelector('td.no-data');
+    if (!noDataCell) return;
+
+    const row = noDataCell.parentElement;
+    if (row && row.parentElement) {
+      row.parentElement.removeChild(row);
+    }
+  }
+
   function updateActiveTrades(trades) {
     const table = document.getElementById('activeTradesTable');
     if (!table) return;
 
     if (!trades.length) {
-      table.innerHTML = '<tr><td colspan="5" class="no-data">нет активных сделок</td></tr>';
+      ensureNoDataMessage(table, 5, 'нет активных сделок');
       return;
     }
 
-    let html = '';
-    trades.forEach((trade) => {
+    clearNoDataMessage(table);
+
+    trades.forEach((trade, i) => {
+      let row = table.rows[i];
+      if (!row) {
+        row = table.insertRow();
+      }
+
       const profitValue = Number(trade.profit);
       const hasProfit = Number.isFinite(profitValue);
       const profitClass = hasProfit ? (profitValue >= 0 ? 'profit' : 'loss') : '';
@@ -1126,17 +1169,38 @@
       const directionClass = isShort ? 'direction-short' : 'direction-long';
       const directionSymbol = isShort ? '▼' : '▲';
 
-      html += `
-        <tr>
-          <td><span class="cell-main">${safeText(trade.symbol)}</span></td>
-          <td>${safeText(trade.module)}</td>
-          <td class="direction ${directionClass}">${directionSymbol}</td>
-          <td${profitClass ? ` class="${profitClass}"` : ''}>${profitText}</td>
-          <td>${escapeHtml(formatTime(trade.entry_time))}</td>
-        </tr>`;
+      const cells = [
+        { html: `<span class="cell-main">${safeText(trade.symbol)}</span>`, className: '' },
+        { html: safeText(trade.module), className: '' },
+        { html: directionSymbol, className: `direction ${directionClass}` },
+        { html: profitText, className: profitClass },
+        { html: escapeHtml(formatTime(trade.entry_time)), className: '' }
+      ];
+
+      cells.forEach((cellConfig, cellIndex) => {
+        let cell = row.cells[cellIndex];
+        if (!cell) {
+          cell = row.insertCell();
+        }
+
+        const targetClass = cellConfig.className || '';
+        if (cell.className !== targetClass) {
+          cell.className = targetClass;
+        }
+
+        if (cell.innerHTML !== cellConfig.html) {
+          cell.innerHTML = cellConfig.html;
+        }
+      });
+
+      while (row.cells.length > cells.length) {
+        row.deleteCell(row.cells.length - 1);
+      }
     });
 
-    table.innerHTML = html;
+    while (table.rows.length > trades.length) {
+      table.deleteRow(table.rows.length - 1);
+    }
   }
 
   function updateClosedTrades(trades) {
@@ -1144,12 +1208,18 @@
     if (!table) return;
 
     if (!trades.length) {
-      table.innerHTML = '<tr><td colspan="6" class="no-data">нет закрытых сделок</td></tr>';
+      ensureNoDataMessage(table, 6, 'нет закрытых сделок');
       return;
     }
 
-    let html = '';
-    trades.forEach((trade) => {
+    clearNoDataMessage(table);
+
+    trades.forEach((trade, i) => {
+      let row = table.rows[i];
+      if (!row) {
+        row = table.insertRow();
+      }
+
       const profitValue = Number(trade.profit);
       const hasProfit = Number.isFinite(profitValue);
       const profitClass = hasProfit ? (profitValue >= 0 ? 'profit' : 'loss') : '';
@@ -1161,24 +1231,45 @@
       const entryTime = formatTime(trade.entry_time);
       const exitTime = formatTime(trade.exit_time);
 
-      html += `
-        <tr>
-          <td><span class="cell-main">${safeText(trade.symbol)}</span></td>
-          <td>${safeText(trade.module)}</td>
-          <td class="direction ${directionClass}">${directionSymbol}</td>
-          <td${profitClass ? ` class="${profitClass}"` : ''}>${profitText}</td>
-          <td>
-            <div class="cell-main">${escapeHtml(nfix(trade.entry_price, 4))}</div>
-            <div class="cell-sub">${escapeHtml(entryTime)}</div>
-          </td>
-          <td>
-            <div class="cell-main">${escapeHtml(nfix(trade.exit_price, 4))}</div>
-            <div class="cell-sub">${escapeHtml(exitTime)}</div>
-          </td>
-        </tr>`;
+      const cells = [
+        { html: `<span class="cell-main">${safeText(trade.symbol)}</span>`, className: '' },
+        { html: safeText(trade.module), className: '' },
+        { html: directionSymbol, className: `direction ${directionClass}` },
+        { html: profitText, className: profitClass },
+        {
+          html: `<div class="cell-main">${escapeHtml(nfix(trade.entry_price, 4))}</div><div class="cell-sub">${escapeHtml(entryTime)}</div>`,
+          className: ''
+        },
+        {
+          html: `<div class="cell-main">${escapeHtml(nfix(trade.exit_price, 4))}</div><div class="cell-sub">${escapeHtml(exitTime)}</div>`,
+          className: ''
+        }
+      ];
+
+      cells.forEach((cellConfig, cellIndex) => {
+        let cell = row.cells[cellIndex];
+        if (!cell) {
+          cell = row.insertCell();
+        }
+
+        const targetClass = cellConfig.className || '';
+        if (cell.className !== targetClass) {
+          cell.className = targetClass;
+        }
+
+        if (cell.innerHTML !== cellConfig.html) {
+          cell.innerHTML = cellConfig.html;
+        }
+      });
+
+      while (row.cells.length > cells.length) {
+        row.deleteCell(row.cells.length - 1);
+      }
     });
 
-    table.innerHTML = html;
+    while (table.rows.length > trades.length) {
+      table.deleteRow(table.rows.length - 1);
+    }
   }
 
   function updateStats(filtered) {

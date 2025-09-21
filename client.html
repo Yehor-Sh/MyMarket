@@ -708,7 +708,7 @@
   }
 
   function setupSocket() {
-    socket = io({ transports: ['websocket'], autoConnect: true });
+    socket = io({ transports: ['polling', 'websocket'], autoConnect: true });
 
     socket.on('connect', () => {
       console.info('[WS] connected');

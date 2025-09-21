@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyMarket Trading Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-tE76vJ2whhUDQOmlYhHn3K+Y9clWMBv5So1VmykYy3yIgAU6YewsGQKzBSSMSmcY" crossorigin="anonymous"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: radial-gradient(circle at top left, #1b2735, #090a0f 55%);
+        --panel: rgba(18, 18, 32, 0.9);
+        --border: rgba(255, 255, 255, 0.1);
+        --accent: #16c784;
+        --danger: #ff4d67;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #f5f5f5;
+        display: flex;
+        justify-content: center;
+        padding: 32px 16px 64px;
+      }
+
+      .app {
+        width: min(1100px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-end;
+      }
+
+      h1 {
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border);
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ffb347;
+        box-shadow: 0 0 10px currentColor;
+      }
+
+      .status-dot.online {
+        background: var(--accent);
+      }
+
+      section {
+        background: var(--panel);
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        padding: 24px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      section h2 {
+        margin: 0 0 16px;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.6);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.92rem;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      th {
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        letter-spacing: 0.1em;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .value-up {
+        color: var(--accent);
+      }
+
+      .value-down {
+        color: var(--danger);
+      }
+
+      .empty {
+        padding: 24px;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.4);
+        border: 1px dashed rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div>
+          <h1>MyMarket Demo Trading Desk</h1>
+          <p>Онлайн-обновления по свечам и сделкам в режиме реального времени.</p>
+        </div>
+        <div class="status" id="connection-status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-label">offline</span>
+        </div>
+      </header>
+
+      <section>
+        <h2>Свечи</h2>
+        <div id="candles-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Время</th>
+                <th>Открытие</th>
+                <th>Макс.</th>
+                <th>Мин.</th>
+                <th>Закрытие</th>
+                <th>Объём</th>
+              </tr>
+            </thead>
+            <tbody id="candles-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Сделки</h2>
+        <div id="trades">
+          <div>
+            <h3>Открытые</h3>
+            <div id="active-trades" class="empty">Нет активных сделок</div>
+          </div>
+          <div style="margin-top: 20px">
+            <h3>Закрытые</h3>
+            <div id="closed-trades" class="empty">История сделок пуста</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const candlesBody = document.getElementById("candles-body");
+      const activeTrades = document.getElementById("active-trades");
+      const closedTrades = document.getElementById("closed-trades");
+      const statusDot = document.getElementById("status-dot");
+      const statusLabel = document.getElementById("status-label");
+
+      function formatNumber(value) {
+        return Number(value).toFixed(2);
+      }
+
+      function formatDate(value) {
+        return new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function renderCandles(candles) {
+        candlesBody.innerHTML = "";
+        candles.slice(-30).reverse().forEach((candle) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${formatDate(candle.close_time)}</td>
+            <td>${formatNumber(candle.open)}</td>
+            <td>${formatNumber(candle.high)}</td>
+            <td>${formatNumber(candle.low)}</td>
+            <td class="${candle.close >= candle.open ? "value-up" : "value-down"}">${formatNumber(candle.close)}</td>
+            <td>${formatNumber(candle.volume)}</td>
+          `;
+          candlesBody.appendChild(row);
+        });
+      }
+
+      function renderTrades(payload) {
+        const { active, closed } = payload;
+
+        if (!active.length) {
+          activeTrades.textContent = "Нет активных сделок";
+          activeTrades.classList.add("empty");
+        } else {
+          activeTrades.classList.remove("empty");
+          activeTrades.innerHTML = "";
+          const list = document.createElement("ul");
+          active.forEach((trade) => {
+            const item = document.createElement("li");
+            item.textContent = `${trade.direction.toUpperCase()} ${trade.symbol} @ ${formatNumber(trade.entry_price)} (SL ${formatNumber(trade.stop_loss)})`;
+            list.appendChild(item);
+          });
+          activeTrades.appendChild(list);
+        }
+
+        if (!closed.length) {
+          closedTrades.textContent = "История сделок пуста";
+          closedTrades.classList.add("empty");
+        } else {
+          closedTrades.classList.remove("empty");
+          closedTrades.innerHTML = "";
+          const list = document.createElement("ul");
+          closed.slice(-10).reverse().forEach((trade) => {
+            const item = document.createElement("li");
+            const profitClass = trade.profit >= 0 ? "value-up" : "value-down";
+            item.innerHTML = `${trade.symbol} — <span class="${profitClass}">${formatNumber(trade.profit || 0)}</span>`;
+            list.appendChild(item);
+          });
+          closedTrades.appendChild(list);
+        }
+      }
+
+      async function bootstrap() {
+        const [candlesResponse, tradesResponse] = await Promise.all([
+          fetch("/api/candles"),
+          fetch("/api/trades"),
+        ]);
+        const candlesData = await candlesResponse.json();
+        const tradesData = await tradesResponse.json();
+        renderCandles(candlesData.candles || []);
+        renderTrades(tradesData);
+      }
+
+      function updateStatus(connected) {
+        statusDot.classList.toggle("online", connected);
+        statusLabel.textContent = connected ? "online" : "offline";
+      }
+
+      const socket = io("/quotes", { transports: ["websocket"] });
+      socket.on("connect", () => updateStatus(true));
+      socket.on("disconnect", () => updateStatus(false));
+      socket.on("candle", (payload) => {
+        bootstrap();
+      });
+      socket.on("trade", (payload) => {
+        bootstrap();
+      });
+
+      bootstrap();
+    </script>
+  </body>
+</html>

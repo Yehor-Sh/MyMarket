@@ -1,0 +1,25 @@
+{
+  "active": [
+    {
+      "id": "demo-trade-1",
+      "symbol": "BTCUSDT",
+      "direction": "long",
+      "entry_price": 42050.0,
+      "stop_loss": 41600.0,
+      "take_profit": 42500.0,
+      "open_time": "2024-01-01T00:02:00+00:00"
+    }
+  ],
+  "closed": [
+    {
+      "id": "demo-trade-0",
+      "symbol": "BTCUSDT",
+      "direction": "long",
+      "entry_price": 41800.0,
+      "exit_price": 42100.0,
+      "profit": 300.0,
+      "open_time": "2023-12-31T23:55:00+00:00",
+      "close_time": "2023-12-31T23:59:00+00:00"
+    }
+  ]
+}

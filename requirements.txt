@@ -1,0 +1,16 @@
+# --- Сервер (без eventlet, чистый Python) ---
+flask==2.2.5
+flask-socketio==5.3.6
+python-engineio==4.9.0
+python-socketio==5.9.0
+Werkzeug==2.2.3
+itsdangerous==2.1.2
+click==8.1.7
+Jinja2==3.1.4
+
+# --- HTTP и WebSocket-клиенты (для fetcher) ---
+httpx==0.24.1
+websockets==10.4
+requests==2.32.3
+
+# НИЧЕГО больше не ставим: без numpy, без pyyaml, без eventlet

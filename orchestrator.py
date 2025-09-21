@@ -141,9 +141,9 @@ class Orchestrator:
     def __init__(
         self,
         *,
-        trailing_percent: float = 0.75,
+        trailing_percent: float = 0.3,
         module_poll_interval: float = 60.0,
-        max_closed_trades: int = 200,
+        max_closed_trades: int = 500,
         max_tracked_symbols: int = 50,
     ) -> None:
         self.client = BinanceClient()

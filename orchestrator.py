@@ -48,13 +48,16 @@ class Trade:
     profit_pct: Optional[float] = None
     is_active: bool = True
 
-    def apply_price(self, price: float) -> bool:
-        """Update trailing stop and close the trade if needed."""
+    def update_trailing_stop(self, price: float) -> Tuple[float, bool]:
+        """Update trailing stop according to the latest ``price``."""
 
         if not self.is_active:
-            return False
+            return self.current_profit_pct, False
+
         self.current_price = price
         profit_pct = self._calculate_profit_pct(price)
+        self.current_profit_pct = profit_pct
+        closed = False
 
         if self.side == "LONG":
             if profit_pct > self.max_profit_pct:
@@ -66,7 +69,7 @@ class Trade:
                     self.trailing_stop = new_stop
             if price <= self.trailing_stop:
                 self._close(price)
-                return True
+                closed = True
         else:  # SHORT
             if profit_pct > self.max_profit_pct:
                 self.max_profit_pct = profit_pct
@@ -77,10 +80,15 @@ class Trade:
                     self.trailing_stop = new_stop
             if price >= self.trailing_stop:
                 self._close(price)
-                return True
+                closed = True
 
-        self.current_profit_pct = profit_pct
-        return False
+        return self.current_profit_pct, closed
+
+    def apply_price(self, price: float) -> bool:
+        """Update trailing stop and close the trade if needed."""
+
+        _, closed = self.update_trailing_stop(price)
+        return closed
 
     def _close(self, price: float) -> None:
         self.exit_price = price
@@ -106,7 +114,9 @@ class Trade:
             "metadata": self.metadata,
             "current_price": self.current_price,
             "current_profit_pct": self.current_profit_pct,
+            "current_profit": self.current_profit_pct,
             "max_profit_pct": self.max_profit_pct,
+            "max_profit": self.max_profit_pct,
             "exit_price": self.exit_price,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "profit_pct": self.profit_pct
@@ -249,6 +259,8 @@ class Orchestrator:
         if price is None:
             return
 
+        self.client.subscribe_ticker([symbol])
+
         initial_stop = self._initial_stop(price, signal.side)
         trade = Trade(
             trade_id=str(uuid.uuid4()),
@@ -284,22 +296,33 @@ class Orchestrator:
         with self._lock:
             trade_ids = list(self._symbol_index.get(symbol, ()))
             trades = [self.active_trades[tid] for tid in trade_ids if tid in self.active_trades]
+        updates: List[Dict[str, object]] = []
         closed: List[Trade] = []
         for trade in trades:
-            if trade.apply_price(price):
+            _, was_closed = trade.update_trailing_stop(price)
+            updates.append(trade.to_dict())
+            if was_closed:
                 closed.append(trade)
+
+        closed_payloads: List[Dict[str, object]] = []
         if closed:
             with self._lock:
                 for trade in closed:
-                    self._finalize_trade(trade)
+                    closed_payloads.append(self._finalize_trade(trade))
+        for payload in closed_payloads:
+            self.socketio.emit("trade_closed", payload)
+
+        if updates:
+            self.socketio.emit("prices_updated", {"trades": updates})
+
+        if closed_payloads:
             self._broadcast_state()
-        else:
+        elif trades:
             # No trade closed but trailing stop may have moved.
-            if trades:
-                self._broadcast_state()
+            self._broadcast_state()
 
     # ------------------------------------------------------------------
-    def _finalize_trade(self, trade: Trade) -> None:
+    def _finalize_trade(self, trade: Trade) -> Dict[str, object]:
         trade.is_active = False
         self.active_trades.pop(trade.trade_id, None)
         symbol_trades = self._symbol_index[trade.symbol]
@@ -311,6 +334,7 @@ class Orchestrator:
         self.closed_trades.append(trade)
         if len(self.closed_trades) > self.max_closed_trades:
             self.closed_trades[:] = self.closed_trades[-self.max_closed_trades :]
+        return trade.to_dict()
 
     # ------------------------------------------------------------------
     def _broadcast_state(self) -> None:

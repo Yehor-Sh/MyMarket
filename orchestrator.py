@@ -17,11 +17,11 @@ from flask_socketio import SocketIO, emit
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
 from module_worker import ModuleWorker
-from modules.strategy_3wl import ThreeLineStrikeStrategy
+from modules.strategy_breakout import BreakoutHighLowStrategy
 from modules.strategy_engulf import EngulfingStrategy
-from modules.strategy_hammer import HammerStrategy
-from modules.strategy_inside import InsideBarStrategy
+from modules.strategy_inside import InsideBarBreakoutStrategy
 from modules.strategy_pinbar import PinBarStrategy
+from modules.strategy_trend import EMABounceStrategy
 
 
 @dataclass
@@ -204,9 +204,9 @@ class Orchestrator:
         modules = [
             EngulfingStrategy(self.client),
             PinBarStrategy(self.client),
-            InsideBarStrategy(self.client),
-            ThreeLineStrikeStrategy(self.client),
-            HammerStrategy(self.client),
+            InsideBarBreakoutStrategy(self.client),
+            BreakoutHighLowStrategy(self.client),
+            EMABounceStrategy(self.client),
         ]
         return modules
 

@@ -266,7 +266,7 @@
         statusLabel.textContent = connected ? "online" : "offline";
       }
 
-      const socket = io("/quotes", { transports: ["websocket"] });
+      const socket = io("/quotes");
       socket.on("connect", () => updateStatus(true));
       socket.on("disconnect", () => updateStatus(false));
       socket.on("candle", (payload) => {

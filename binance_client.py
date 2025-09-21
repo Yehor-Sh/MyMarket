@@ -37,6 +37,12 @@ BINANCE_REST_ENDPOINT = "https://api.binance.com"
 
 _logger = logging.getLogger(__name__)
 
+MIN_VOLUME = 10_000_000.0
+MIN_PRICE = 0.50
+MAX_PRICE = 5000.0
+EXCLUDE_STABLE = ("USDC", "BUSD", "FDUSD", "TUSD", "USDTUSDT")
+EXCLUDE_SYMBOLS = {"BTCDOMUSDT", "SPXUSDT"}
+
 
 @dataclass(frozen=True)
 class Kline:
@@ -109,25 +115,18 @@ class BinanceClient:
     """
 
     DEFAULT_EXCLUDED_KEYWORDS = ("UP", "DOWN", "BULL", "BEAR")
-    DEFAULT_EXCLUDED_BASES = {
-        "USDT",
-        "USDC",
-        "BUSD",
-        "TUSD",
-        "FDUSD",
-        "DAI",
-        "EUR",
-        "GBP",
-    }
+    DEFAULT_EXCLUDED_BASES = {"USDT", "DAI", "EUR", "GBP"}.union(
+        coin for coin in EXCLUDE_STABLE if len(coin) <= 5
+    )
 
     def __init__(
         self,
         *,
         ticker_interval: float = 1.0,
         liquidity_refresh_interval: float = 600.0,
-        min_volume: float = 10_000_000.0,
-        min_price: float = 0.1,
-        max_price: float = 100_000.0,
+        min_volume: float = MIN_VOLUME,
+        min_price: float = MIN_PRICE,
+        max_price: float = MAX_PRICE,
         session: Optional[requests.Session] = None,
     ) -> None:
         self._session = session or requests.Session()
@@ -328,10 +327,12 @@ class BinanceClient:
         for entry in data:
             try:
                 symbol = entry["symbol"].upper()
+                if symbol in EXCLUDE_SYMBOLS or symbol in EXCLUDE_STABLE:
+                    continue
                 if not symbol.endswith("USDT"):
                     continue
                 base = symbol[:-4]
-                if base in self.DEFAULT_EXCLUDED_BASES:
+                if base in EXCLUDE_STABLE or base in self.DEFAULT_EXCLUDED_BASES:
                     continue
                 if any(keyword in symbol for keyword in self.DEFAULT_EXCLUDED_KEYWORDS):
                     continue

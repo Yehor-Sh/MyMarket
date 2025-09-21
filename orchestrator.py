@@ -109,7 +109,9 @@ class Trade:
             "max_profit_pct": self.max_profit_pct,
             "exit_price": self.exit_price,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
-            "profit_pct": self.profit_pct,
+            "profit_pct": self.profit_pct
+            if self.profit_pct is not None
+            else self.current_profit_pct,
             "status": "active" if self.is_active else "closed",
         }
 

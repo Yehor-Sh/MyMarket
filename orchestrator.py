@@ -35,10 +35,14 @@ class Trade:
     opened_at: datetime
     trailing_percent: float
     trailing_stop: float
+    initial_stop: float
     high_watermark: float
     low_watermark: float
     metadata: Dict[str, float] = field(default_factory=dict)
     confidence: float = 1.0
+    current_price: Optional[float] = None
+    max_profit_pct: float = 0.0
+    current_profit_pct: float = 0.0
     exit_price: Optional[float] = None
     closed_at: Optional[datetime] = None
     profit_pct: Optional[float] = None
@@ -49,29 +53,42 @@ class Trade:
 
         if not self.is_active:
             return False
+        self.current_price = price
+        profit_pct = self._calculate_profit_pct(price)
+
         if self.side == "LONG":
-            if price > self.high_watermark:
-                self.high_watermark = price
-                self.trailing_stop = price * (1 - self.trailing_percent / 100.0)
-            elif price <= self.trailing_stop:
+            if profit_pct > self.max_profit_pct:
+                self.max_profit_pct = profit_pct
+                if price > self.high_watermark:
+                    self.high_watermark = price
+                new_stop = price * (1 - self.trailing_percent / 100.0)
+                if new_stop > self.trailing_stop:
+                    self.trailing_stop = new_stop
+            if price <= self.trailing_stop:
                 self._close(price)
                 return True
         else:  # SHORT
-            if price < self.low_watermark:
-                self.low_watermark = price
-                self.trailing_stop = price * (1 + self.trailing_percent / 100.0)
-            elif price >= self.trailing_stop:
+            if profit_pct > self.max_profit_pct:
+                self.max_profit_pct = profit_pct
+                if price < self.low_watermark:
+                    self.low_watermark = price
+                new_stop = price * (1 + self.trailing_percent / 100.0)
+                if new_stop < self.trailing_stop or self._is_initial_stop():
+                    self.trailing_stop = new_stop
+            if price >= self.trailing_stop:
                 self._close(price)
                 return True
+
+        self.current_profit_pct = profit_pct
         return False
 
     def _close(self, price: float) -> None:
         self.exit_price = price
         self.closed_at = datetime.utcnow()
-        if self.side == "LONG":
-            self.profit_pct = (price - self.entry_price) / self.entry_price * 100.0
-        else:
-            self.profit_pct = (self.entry_price - price) / self.entry_price * 100.0
+        self.profit_pct = self._calculate_profit_pct(price)
+        self.current_profit_pct = self.profit_pct or 0.0
+        self.max_profit_pct = max(self.max_profit_pct, self.current_profit_pct)
+        self.current_price = price
         self.trailing_stop = price
         self.is_active = False
 
@@ -87,11 +104,23 @@ class Trade:
             "trailing_stop": self.trailing_stop,
             "confidence": self.confidence,
             "metadata": self.metadata,
+            "current_price": self.current_price,
+            "current_profit_pct": self.current_profit_pct,
+            "max_profit_pct": self.max_profit_pct,
             "exit_price": self.exit_price,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "profit_pct": self.profit_pct,
             "status": "active" if self.is_active else "closed",
         }
+
+    def _calculate_profit_pct(self, price: float) -> float:
+        if self.side == "LONG":
+            return (price - self.entry_price) / self.entry_price * 100.0
+        return (self.entry_price - price) / self.entry_price * 100.0
+
+    def _is_initial_stop(self) -> bool:
+        tolerance = max(1e-8, self.entry_price * 1e-6)
+        return abs(self.trailing_stop - self.initial_stop) <= tolerance
 
 
 class Orchestrator:
@@ -218,6 +247,7 @@ class Orchestrator:
         if price is None:
             return
 
+        initial_stop = self._initial_stop(price, signal.side)
         trade = Trade(
             trade_id=str(uuid.uuid4()),
             symbol=symbol,
@@ -227,11 +257,13 @@ class Orchestrator:
             quantity=1.0,
             opened_at=datetime.utcnow(),
             trailing_percent=self.trailing_percent,
-            trailing_stop=self._initial_stop(price, signal.side),
+            trailing_stop=initial_stop,
+            initial_stop=initial_stop,
             high_watermark=price,
             low_watermark=price,
             metadata=signal.metadata,
             confidence=signal.confidence,
+            current_price=price,
         )
         with self._lock:
             self.active_trades[trade.trade_id] = trade

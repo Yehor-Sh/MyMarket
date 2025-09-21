@@ -8,6 +8,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
+from itertools import zip_longest
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -16,7 +17,7 @@ from flask_socketio import SocketIO, emit
 
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
-from module_worker import ModuleWorker
+from module_worker import ModuleHealth, ModuleWorker
 from modules.strategy_breakout import BreakoutHighLowStrategy
 from modules.strategy_engulf import EngulfingStrategy
 from modules.strategy_inside import InsideBarBreakoutStrategy
@@ -196,14 +197,19 @@ class Orchestrator:
             emit("trades", self._serialize_state())
 
         @self.socketio.on("close_all_trades")
-        def _on_close_all_trades():
+        def _on_close_all_trades(data=None):
             count = self.close_all_trades()
             return {"status": "ok", "count": count}
 
         @self.socketio.on("clear_cache")
-        def _on_clear_cache():
+        def _on_clear_cache(data=None):
             self.client.clear_caches()
             return {"status": "ok"}
+
+        @self.socketio.on("request_module_health")
+        def _on_request_module_health(data=None):
+            health = self.get_modules_health()
+            return {"status": "ok", "health": health}
 
     # ------------------------------------------------------------------
     def _build_modules(self) -> List[ModuleBase]:
@@ -413,6 +419,40 @@ class Orchestrator:
             "closed": closed,
             "server_time": datetime.now(UTC).isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    def get_modules_health(self) -> List[Dict[str, object]]:
+        """Return health snapshots for all registered modules."""
+
+        if not self.workers:
+            return [
+                ModuleHealth(
+                    name=module.name,
+                    abbreviation=module.abbreviation,
+                    interval=module.interval,
+                    lookback=int(getattr(module, "lookback", 0) or 0),
+                    status="offline",
+                ).to_dict(is_alive=False)
+                for module in self.modules
+            ]
+
+        health: List[Dict[str, object]] = []
+        for module, worker in zip_longest(self.modules, self.workers):
+            if module is None:
+                continue
+            if worker is None:
+                placeholder = ModuleHealth(
+                    name=module.name,
+                    abbreviation=module.abbreviation,
+                    interval=module.interval,
+                    lookback=int(getattr(module, "lookback", 0) or 0),
+                    status="offline",
+                )
+                health.append(placeholder.to_dict(is_alive=False))
+                continue
+            snapshot = worker.get_health()
+            health.append(snapshot.to_dict(is_alive=worker.is_alive()))
+        return health
 
 
 def create_app() -> Tuple[Flask, Orchestrator, SocketIO]:

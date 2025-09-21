@@ -369,24 +369,32 @@ class BinanceClient:
                 _logger.exception("price listener failed for %s", symbol)
 
     def _fetch_ticker_prices(self, symbols: Iterable[str]) -> Dict[str, float]:
+        import json
+
         payload: Dict[str, float] = {}
-        symbols_list = [s.upper() for s in symbols]
-        # Binance supports requesting a batch of tickers by encoding the list as
-        # JSON.  Falling back to sequential requests would unnecessarily
-        # increase the number of round trips.
-        params = {"symbols": json.dumps(symbols_list)}
-        response = self._session.get(
-            f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",
-            params=params,
-            timeout=5,
-        )
-        response.raise_for_status()
-        data = response.json()
-        for entry in data:
-            symbol = entry["symbol"].upper()
-            price = float(entry["price"])
-            payload[symbol] = price
+        symbols_list = [s.upper() for s in symbols if s and s.endswith("USDT")]
+        chunk_size = 50
+
+        for i in range(0, len(symbols_list), chunk_size):
+            chunk = symbols_list[i:i + chunk_size]
+            params = {"symbols": json.dumps(chunk)}
+            response = self._session.get(
+                f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",
+                params=params,
+                timeout=5,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Защита от неожиданных ответов
+            if isinstance(data, list):
+                for entry in data:
+                    try:
+                        payload[entry["symbol"].upper()] = float(entry["price"])
+                    except (KeyError, ValueError, TypeError):
+                        continue
         return payload
+
 
     def _queue_ws_subscription(self, symbols: Iterable[str]) -> None:
         if not symbols:

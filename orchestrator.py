@@ -7,7 +7,7 @@ import threading
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -182,7 +182,7 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _register_socket_handlers(self) -> None:
         @self.socketio.on("connect")
-        def _on_connect():
+        def _on_connect(auth=None):
             emit("trades", self._serialize_state())
 
         @self.socketio.on("request_state")
@@ -388,6 +388,8 @@ class Orchestrator:
         return len(closed_payloads)
 
     # ------------------------------------------------------------------
+    from datetime import datetime, UTC
+
     def _serialize_state(self) -> Dict[str, object]:
         with self._lock:
             active = [trade.to_dict() for trade in self.active_trades.values()]
@@ -397,7 +399,7 @@ class Orchestrator:
         return {
             "active": active,
             "closed": closed,
-            "server_time": datetime.utcnow().isoformat(),
+            "server_time": datetime.now(UTC).isoformat(),
         }
 
 

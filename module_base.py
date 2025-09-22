@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Literal, Sequence
+from typing import Dict, Iterable, List, Literal, Optional, Sequence
 
 from binance_client import BinanceClient, Kline
 
@@ -77,6 +77,18 @@ class ModuleBase(ABC):
     @abstractmethod
     def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
         """Inspect the provided candles and yield signals."""
+
+    # ------------------------------------------------------------------
+    def run(self, symbol: str, candles: Sequence[Kline]) -> Optional[Signal]:
+        """Execute the strategy for a single symbol.
+
+        The default implementation delegates to :meth:`process` and returns the
+        first signal emitted, if any.  Strategies are free to override this if
+        they prefer a different behaviour.
+        """
+
+        signals = list(self.process(symbol, candles))
+        return signals[0] if signals else None
 
     # ------------------------------------------------------------------
     def make_signal(

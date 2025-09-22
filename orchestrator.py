@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
+import logging
+import pkgutil
 import queue
 import threading
 import uuid
@@ -18,14 +22,9 @@ from flask_socketio import SocketIO, emit
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
 from module_worker import ModuleHealth, ModuleWorker
-from modules.strategy_atr_ema_breakout import ATRBreakoutStrategy
-from modules.strategy_engulfing_rsi import EngulfingRSIStrategy
-from modules.strategy_inside_breakout import InsideBarVolumeBreakoutStrategy
-from modules.strategy_pinbar_level import PinBarLevelStrategy
-from modules.strategy_vwap_reversal import VWAPTrendReversalStrategy
-from modules.strategy_triple_ema import TripleEMASqueezeStrategy
-from modules.strategy_rsi_divergence import RSIDivergenceStrategy
-from modules.strategy_bollinger_squeeze import BollingerSqueezeBreakoutStrategy
+
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -168,7 +167,10 @@ class Orchestrator:
         self._signal_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        self.modules = self._build_modules()
+        self.strategies: Dict[str, ModuleBase] = self._discover_strategies()
+        self.modules: List[ModuleBase] = [
+            self.strategies[key] for key in sorted(self.strategies)
+        ]
         self.workers: List[ModuleWorker] = []
 
         self.client.add_price_listener(self._handle_price_update)
@@ -209,18 +211,95 @@ class Orchestrator:
             return {"status": "ok", "health": health}
 
     # ------------------------------------------------------------------
-    def _build_modules(self) -> List[ModuleBase]:
-        modules = [
-            ATRBreakoutStrategy(self.client),
-            EngulfingRSIStrategy(self.client),
-            InsideBarVolumeBreakoutStrategy(self.client),
-            PinBarLevelStrategy(self.client),
-            VWAPTrendReversalStrategy(self.client),
-            TripleEMASqueezeStrategy(self.client),
-            RSIDivergenceStrategy(self.client),
-            BollingerSqueezeBreakoutStrategy(self.client),
-        ]
-        return modules
+    def _discover_strategies(self) -> Dict[str, ModuleBase]:
+        """Load strategy implementations from the ``modules`` package."""
+
+        try:
+            import modules as strategies_pkg
+        except ImportError:  # pragma: no cover - defensive
+            _logger.exception("failed to import strategy package")
+            return {}
+
+        discovered: Dict[str, ModuleBase] = {}
+
+        for module_info in pkgutil.iter_modules(strategies_pkg.__path__, prefix=f"{strategies_pkg.__name__}."):
+            module_name = module_info.name
+            short_name = module_name.rsplit(".", 1)[-1]
+            if not short_name.startswith("strategy_"):
+                continue
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:  # pragma: no cover - defensive
+                _logger.exception("failed to import strategy module %s", module_name)
+                continue
+
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if obj.__module__ != module.__name__:
+                    continue
+                if not issubclass(obj, ModuleBase):
+                    continue
+                if inspect.isabstract(obj):
+                    continue
+                try:
+                    instance = obj(self.client)
+                except TypeError:
+                    _logger.warning(
+                        "strategy %s cannot be instantiated with the Binance client; skipping",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                    continue
+                except Exception:  # pragma: no cover - defensive
+                    _logger.exception(
+                        "unexpected error initialising strategy %s",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                    continue
+
+                if not hasattr(instance, "name") or not isinstance(instance.name, str):
+                    _logger.warning(
+                        "strategy %s does not define a valid name; skipping",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                    continue
+
+                run_method = getattr(instance, "run", None)
+                if not callable(run_method):
+                    _logger.warning(
+                        "strategy %s does not provide a callable 'run' method; skipping",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                    continue
+
+                abbreviation = getattr(instance, "abbreviation", None)
+                if not abbreviation:
+                    _logger.warning(
+                        "strategy %s does not declare an abbreviation; skipping",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                    continue
+
+                key = str(abbreviation).upper()
+                if key in discovered:
+                    _logger.warning(
+                        "duplicate strategy abbreviation '%s' found in %s; keeping existing instance",
+                        key,
+                        module_name,
+                    )
+                    continue
+
+                discovered[key] = instance
+
+        if not discovered:
+            _logger.warning("no strategy modules were discovered")
+        else:
+            abbreviations = ", ".join(sorted(discovered))
+            _logger.info(
+                "discovered %d strategy module(s): %s",
+                len(discovered),
+                abbreviations,
+            )
+
+        return discovered
 
     # ------------------------------------------------------------------
     def start(self) -> None:

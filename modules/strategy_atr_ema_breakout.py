@@ -1,4 +1,4 @@
-"""N-day high/low breakout strategy."""
+"""ATR and EMA breakout strategy (BRK)."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from module_base import ModuleBase, Signal
 from .indicators import atr, ema
 
 
-class BreakoutHighLowStrategy(ModuleBase):
-    """Emit signals when price breaks out of recent ranges with volatility."""
+class ATRBreakoutStrategy(ModuleBase):
+    """Emit signals when price breaks key levels with strong volatility."""
 
     def __init__(
         self,
         client,
         *,
-        interval: str = "4h",
+        interval: str = "1h",
         lookback: int = 200,
         breakout_period: int = 20,
         atr_period: int = 14,
@@ -36,7 +36,7 @@ class BreakoutHighLowStrategy(ModuleBase):
         )
         super().__init__(
             client,
-            name="BreakoutHighLow",
+            name="ATR + EMA Breakout",
             abbreviation="BRK",
             interval=interval,
             lookback=max(lookback, minimum_history),
@@ -49,13 +49,15 @@ class BreakoutHighLowStrategy(ModuleBase):
         self._volume_window = volume_window
 
     def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) < self._breakout_period + 1:
+        if len(candles) < self.lookback:
             return []
 
-        breakout_candle = candles[-1]
-        high_window = candles[-(self._breakout_period + 1) : -1]
-        recent_high = max(c.high for c in high_window)
-        recent_low = min(c.low for c in high_window)
+        current = candles[-1]
+        window = candles[-(self._breakout_period + 1) : -1]
+        if not window:
+            return []
+        recent_high = max(candle.high for candle in window)
+        recent_low = min(candle.low for candle in window)
 
         atr_values = atr(candles, self._atr_period)
         if not atr_values or math.isnan(atr_values[-1]):
@@ -72,7 +74,7 @@ class BreakoutHighLowStrategy(ModuleBase):
         if current_atr <= median_atr:
             return []
 
-        closes = [c.close for c in candles]
+        closes = [candle.close for candle in candles]
         ema_fast_values = ema(closes, self._ema_fast_period)
         ema_slow_values = ema(closes, self._ema_slow_period)
         if (
@@ -82,51 +84,70 @@ class BreakoutHighLowStrategy(ModuleBase):
             or math.isnan(ema_slow_values[-1])
         ):
             return []
-        ema_fast_curr = ema_fast_values[-1]
-        ema_slow_curr = ema_slow_values[-1]
+        ema_fast_current = ema_fast_values[-1]
+        ema_slow_current = ema_slow_values[-1]
 
-        if len(candles) <= self._volume_window:
-            return []
         volume_slice = candles[-(self._volume_window + 1) : -1]
-        avg_volume = mean(c.volume for c in volume_slice)
-        if avg_volume <= 0 or breakout_candle.volume <= avg_volume:
+        if len(volume_slice) < self._volume_window:
             return []
+        average_volume = mean(candle.volume for candle in volume_slice)
+        if average_volume <= 0:
+            return []
+        volume_ratio = current.volume / average_volume
 
         signals: List[Signal] = []
 
         if (
-            breakout_candle.close > recent_high
-            and ema_fast_curr > ema_slow_curr
+            current.close > recent_high
+            and ema_fast_current > ema_slow_current
+            and volume_ratio > 1.0
         ):
+            breakout_distance = current.close - recent_high
+            signal_strength = (
+                breakout_distance / current_atr if current_atr > 0 else 0.0
+            )
             metadata = {
+                "atr_value": current_atr,
                 "breakout_level": recent_high,
-                "atr": current_atr,
-                "median_atr": median_atr,
-                "direction": "up",
-                "ema_fast": ema_fast_curr,
-                "ema_slow": ema_slow_curr,
-                "volume": breakout_candle.volume,
-                "avg_volume": avg_volume,
+                "ema_trend": "bullish",
+                "volume_ratio": volume_ratio,
+                "signal_strength": signal_strength,
             }
-            signals.append(self.make_signal(symbol, "LONG", confidence=1.1, metadata=metadata))
+            signals.append(
+                self.make_signal(
+                    symbol,
+                    "LONG",
+                    confidence=1.1,
+                    metadata=metadata,
+                )
+            )
 
         if (
-            breakout_candle.close < recent_low
-            and ema_fast_curr < ema_slow_curr
+            current.close < recent_low
+            and ema_fast_current < ema_slow_current
+            and volume_ratio > 1.0
         ):
+            breakout_distance = recent_low - current.close
+            signal_strength = (
+                breakout_distance / current_atr if current_atr > 0 else 0.0
+            )
             metadata = {
+                "atr_value": current_atr,
                 "breakout_level": recent_low,
-                "atr": current_atr,
-                "median_atr": median_atr,
-                "direction": "down",
-                "ema_fast": ema_fast_curr,
-                "ema_slow": ema_slow_curr,
-                "volume": breakout_candle.volume,
-                "avg_volume": avg_volume,
+                "ema_trend": "bearish",
+                "volume_ratio": volume_ratio,
+                "signal_strength": signal_strength,
             }
-            signals.append(self.make_signal(symbol, "SHORT", confidence=1.1, metadata=metadata))
+            signals.append(
+                self.make_signal(
+                    symbol,
+                    "SHORT",
+                    confidence=1.1,
+                    metadata=metadata,
+                )
+            )
 
         return signals
 
 
-__all__ = ["BreakoutHighLowStrategy"]
+__all__ = ["ATRBreakoutStrategy"]

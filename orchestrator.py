@@ -18,17 +18,14 @@ from flask_socketio import SocketIO, emit
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
 from module_worker import ModuleHealth, ModuleWorker
-from modules.strategy_breakout import BreakoutHighLowStrategy
-from modules.strategy_engulf import EngulfingStrategy
-from modules.strategy_inside import InsideBarBreakoutStrategy
-from modules.strategy_mean_reversion import MeanReversionStrategy
-from modules.strategy_momentum_factor import MomentumFactorStrategy
-from modules.strategy_pattern_recognition import PatternRecognitionStrategy
-from modules.strategy_pinbar import PinBarStrategy
-from modules.strategy_range_breakout import RangeBreakoutStrategy
-from modules.strategy_trend import EMABounceStrategy
-from modules.strategy_volume_trend import VolumeWeightedTrendStrategy
-from modules.strategy_volatility_breakout import VolatilityBreakoutStrategy
+from modules.strategy_atr_ema_breakout import ATRBreakoutStrategy
+from modules.strategy_engulfing_rsi import EngulfingRSIStrategy
+from modules.strategy_inside_breakout import InsideBarVolumeBreakoutStrategy
+from modules.strategy_pinbar_level import PinBarLevelStrategy
+from modules.strategy_vwap_reversal import VWAPTrendReversalStrategy
+from modules.strategy_triple_ema import TripleEMASqueezeStrategy
+from modules.strategy_rsi_divergence import RSIDivergenceStrategy
+from modules.strategy_bollinger_squeeze import BollingerSqueezeBreakoutStrategy
 
 
 @dataclass
@@ -214,17 +211,14 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _build_modules(self) -> List[ModuleBase]:
         modules = [
-            EngulfingStrategy(self.client),
-            PinBarStrategy(self.client),
-            InsideBarBreakoutStrategy(self.client),
-            BreakoutHighLowStrategy(self.client),
-            EMABounceStrategy(self.client),
-            RangeBreakoutStrategy(self.client),
-            VolatilityBreakoutStrategy(self.client),
-            MeanReversionStrategy(self.client),
-            VolumeWeightedTrendStrategy(self.client),
-            MomentumFactorStrategy(self.client),
-            PatternRecognitionStrategy(self.client),
+            ATRBreakoutStrategy(self.client),
+            EngulfingRSIStrategy(self.client),
+            InsideBarVolumeBreakoutStrategy(self.client),
+            PinBarLevelStrategy(self.client),
+            VWAPTrendReversalStrategy(self.client),
+            TripleEMASqueezeStrategy(self.client),
+            RSIDivergenceStrategy(self.client),
+            BollingerSqueezeBreakoutStrategy(self.client),
         ]
         return modules
 

@@ -19,7 +19,7 @@ class TripleEMASqueezeStrategy(ModuleBase):
         self,
         client,
         *,
-        interval: str = "1h",
+        interval: str = "5m",
         lookback: int = 220,
         ema_fast_period: int = 9,
         ema_mid_period: int = 21,

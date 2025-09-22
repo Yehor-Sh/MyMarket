@@ -1,9 +1,11 @@
 """Mean reversion strategy with z-score and reversal confirmation."""
 
+
 from __future__ import annotations
 
 from statistics import fmean, pstdev
 from typing import Iterable, Sequence
+
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
@@ -24,6 +26,7 @@ class MeanReversionStrategy(ModuleBase):
         z_threshold: float = 2.0,
     ) -> None:
         minimum_history = max(lookback, window + 220, 240)
+
         super().__init__(
             client,
             name="MeanReversion",

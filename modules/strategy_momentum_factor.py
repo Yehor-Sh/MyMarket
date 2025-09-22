@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
+
 from binance_client import Kline
 from module_base import ModuleBase, Signal
 
 from .strategy_shared import base_metadata, passes_sanity
-
 
 class MomentumFactorStrategy(ModuleBase):
     """Capture short term momentum bursts in the direction of the trend."""
@@ -23,6 +23,7 @@ class MomentumFactorStrategy(ModuleBase):
         threshold: float = 0.008,
     ) -> None:
         minimum_history = max(lookback, momentum_window + 210, 220)
+
         super().__init__(
             client,
             name="MomentumFactor",

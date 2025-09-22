@@ -19,7 +19,7 @@ class BollingerSqueezeBreakoutStrategy(ModuleBase):
         self,
         client,
         *,
-        interval: str = "1h",
+        interval: str = "5m",
         lookback: int = 220,
         bollinger_period: int = 20,
         atr_period: int = 14,

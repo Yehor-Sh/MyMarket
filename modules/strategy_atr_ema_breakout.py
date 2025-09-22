@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from statistics import mean, median
-from typing import Iterable, List
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
@@ -19,7 +19,7 @@ class ATRBreakoutStrategy(ModuleBase):
         self,
         client,
         *,
-        interval: str = "1h",
+        interval: str = "5m",
         lookback: int = 200,
         breakout_period: int = 20,
         atr_period: int = 14,
@@ -48,18 +48,21 @@ class ATRBreakoutStrategy(ModuleBase):
         self._ema_slow_period = ema_slow_period
         self._volume_window = volume_window
 
-    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) < self.lookback:
+    def _identify_breakouts(
+        self, candles: Sequence[Kline]
+    ) -> List[Dict[str, object]]:
+        series = list(candles)
+        if len(series) < self.lookback:
             return []
 
-        current = candles[-1]
-        window = candles[-(self._breakout_period + 1) : -1]
+        current = series[-1]
+        window = series[-(self._breakout_period + 1) : -1]
         if not window:
             return []
         recent_high = max(candle.high for candle in window)
         recent_low = min(candle.low for candle in window)
 
-        atr_values = atr(candles, self._atr_period)
+        atr_values = atr(series, self._atr_period)
         if not atr_values or math.isnan(atr_values[-1]):
             return []
         atr_slice = [
@@ -74,7 +77,7 @@ class ATRBreakoutStrategy(ModuleBase):
         if current_atr <= median_atr:
             return []
 
-        closes = [candle.close for candle in candles]
+        closes = [candle.close for candle in series]
         ema_fast_values = ema(closes, self._ema_fast_period)
         ema_slow_values = ema(closes, self._ema_slow_period)
         if (
@@ -87,7 +90,7 @@ class ATRBreakoutStrategy(ModuleBase):
         ema_fast_current = ema_fast_values[-1]
         ema_slow_current = ema_slow_values[-1]
 
-        volume_slice = candles[-(self._volume_window + 1) : -1]
+        volume_slice = series[-(self._volume_window + 1) : -1]
         if len(volume_slice) < self._volume_window:
             return []
         average_volume = mean(candle.volume for candle in volume_slice)
@@ -95,7 +98,7 @@ class ATRBreakoutStrategy(ModuleBase):
             return []
         volume_ratio = current.volume / average_volume
 
-        signals: List[Signal] = []
+        candidates: List[Dict[str, object]] = []
 
         if (
             current.close > recent_high
@@ -113,14 +116,7 @@ class ATRBreakoutStrategy(ModuleBase):
                 "volume_ratio": volume_ratio,
                 "signal_strength": signal_strength,
             }
-            signals.append(
-                self.make_signal(
-                    symbol,
-                    "LONG",
-                    confidence=1.1,
-                    metadata=metadata,
-                )
-            )
+            candidates.append({"side": "LONG", "metadata": metadata})
 
         if (
             current.close < recent_low
@@ -138,10 +134,94 @@ class ATRBreakoutStrategy(ModuleBase):
                 "volume_ratio": volume_ratio,
                 "signal_strength": signal_strength,
             }
+            candidates.append({"side": "SHORT", "metadata": metadata})
+
+        return candidates
+
+    def _ema_trend(
+        self, candles: Sequence[Kline]
+    ) -> Optional[Tuple[str, float, float]]:
+        series = list(candles)
+        if len(series) < self._ema_slow_period:
+            return None
+
+        closes = [candle.close for candle in series]
+        ema_fast_values = ema(closes, self._ema_fast_period)
+        ema_slow_values = ema(closes, self._ema_slow_period)
+        if (
+            not ema_fast_values
+            or not ema_slow_values
+            or math.isnan(ema_fast_values[-1])
+            or math.isnan(ema_slow_values[-1])
+        ):
+            return None
+
+        ema_fast_current = ema_fast_values[-1]
+        ema_slow_current = ema_slow_values[-1]
+        if ema_fast_current > ema_slow_current:
+            trend = "bullish"
+        elif ema_fast_current < ema_slow_current:
+            trend = "bearish"
+        else:
+            return None
+        return trend, ema_fast_current, ema_slow_current
+
+    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
+        if len(candles) < self.lookback:
+            return []
+
+        candidates = self._identify_breakouts(candles)
+        return [
+            self.make_signal(
+                symbol,
+                candidate["side"],
+                confidence=1.1,
+                metadata=candidate["metadata"],
+            )
+            for candidate in candidates
+        ]
+
+    def process_with_timeframes(
+        self,
+        symbol: str,
+        primary_candles: Sequence[Kline],
+        extra_candles: Mapping[str, Sequence[Kline]],
+    ) -> Iterable[Signal]:
+        candidates = self._identify_breakouts(primary_candles)
+        if not candidates:
+            return []
+
+        h1_candles = extra_candles.get("1h")
+        if not h1_candles:
+            return []
+
+        higher_trend = self._ema_trend(h1_candles)
+        if not higher_trend:
+            return []
+
+        trend_direction, ema_fast_value, ema_slow_value = higher_trend
+
+        signals: List[Signal] = []
+        for candidate in candidates:
+            side = candidate["side"]
+            metadata = dict(candidate["metadata"])
+            if side == "LONG" and trend_direction != "bullish":
+                continue
+            if side == "SHORT" and trend_direction != "bearish":
+                continue
+
+            metadata.update(
+                {
+                    "trend_timeframe": "1h",
+                    "higher_trend": trend_direction,
+                    "higher_ema_fast": ema_fast_value,
+                    "higher_ema_slow": ema_slow_value,
+                }
+            )
             signals.append(
                 self.make_signal(
                     symbol,
-                    "SHORT",
+                    side,
                     confidence=1.1,
                     metadata=metadata,
                 )

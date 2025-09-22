@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from statistics import mean
-from typing import Iterable, List
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
@@ -19,7 +19,7 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
         self,
         client,
         *,
-        interval: str = "1h",
+        interval: str = "5m",
         lookback: int = 160,
         ema_fast_period: int = 20,
         ema_slow_period: int = 50,
@@ -43,20 +43,23 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
         self._volume_window = volume_window
         self._breakout_period = breakout_period
 
-    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) < self.lookback or len(candles) < 3:
+    def _identify_breakouts(
+        self, candles: Sequence[Kline]
+    ) -> List[Dict[str, object]]:
+        series = list(candles)
+        if len(series) < self.lookback or len(series) < 3:
             return []
 
-        mother = candles[-3]
-        inside = candles[-2]
-        breakout = candles[-1]
+        mother = series[-3]
+        inside = series[-2]
+        breakout = series[-1]
 
         if not (
             inside.high <= mother.high and inside.low >= mother.low
         ):
             return []
 
-        closes = [candle.close for candle in candles]
+        closes = [candle.close for candle in series]
         ema_fast = ema(closes, self._ema_fast_period)
         ema_slow = ema(closes, self._ema_slow_period)
         if (
@@ -69,7 +72,7 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
         ema_fast_current = ema_fast[-1]
         ema_slow_current = ema_slow[-1]
 
-        volume_slice = candles[-(self._volume_window + 1) : -1]
+        volume_slice = series[-(self._volume_window + 1) : -1]
         if len(volume_slice) < self._volume_window:
             return []
         average_volume = mean(candle.volume for candle in volume_slice)
@@ -77,10 +80,14 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
             return []
         volume_ratio = breakout.volume / average_volume
 
-        signals: List[Signal] = []
+        candidates: List[Dict[str, object]] = []
 
-        recent_high = max(candle.high for candle in candles[-(self._breakout_period + 1) : -1])
-        recent_low = min(candle.low for candle in candles[-(self._breakout_period + 1) : -1])
+        recent_high = max(
+            candle.high for candle in series[-(self._breakout_period + 1) : -1]
+        )
+        recent_low = min(
+            candle.low for candle in series[-(self._breakout_period + 1) : -1]
+        )
 
         if (
             breakout.close > mother.high
@@ -94,14 +101,7 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
                 "ema_trend": "bullish",
                 "volume_ratio": volume_ratio,
             }
-            signals.append(
-                self.make_signal(
-                    symbol,
-                    "LONG",
-                    confidence=1.1,
-                    metadata=metadata,
-                )
-            )
+            candidates.append({"side": "LONG", "metadata": metadata})
 
         if (
             breakout.close < mother.low
@@ -115,10 +115,94 @@ class InsideBarVolumeBreakoutStrategy(ModuleBase):
                 "ema_trend": "bearish",
                 "volume_ratio": volume_ratio,
             }
+            candidates.append({"side": "SHORT", "metadata": metadata})
+
+        return candidates
+
+    def _ema_trend(
+        self, candles: Sequence[Kline]
+    ) -> Optional[Tuple[str, float, float]]:
+        series = list(candles)
+        if len(series) < self._ema_slow_period:
+            return None
+
+        closes = [candle.close for candle in series]
+        ema_fast = ema(closes, self._ema_fast_period)
+        ema_slow = ema(closes, self._ema_slow_period)
+        if (
+            not ema_fast
+            or not ema_slow
+            or math.isnan(ema_fast[-1])
+            or math.isnan(ema_slow[-1])
+        ):
+            return None
+
+        ema_fast_current = ema_fast[-1]
+        ema_slow_current = ema_slow[-1]
+        if ema_fast_current > ema_slow_current:
+            trend = "bullish"
+        elif ema_fast_current < ema_slow_current:
+            trend = "bearish"
+        else:
+            return None
+        return trend, ema_fast_current, ema_slow_current
+
+    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
+        if len(candles) < self.lookback:
+            return []
+
+        candidates = self._identify_breakouts(candles)
+        return [
+            self.make_signal(
+                symbol,
+                candidate["side"],
+                confidence=1.1,
+                metadata=candidate["metadata"],
+            )
+            for candidate in candidates
+        ]
+
+    def process_with_timeframes(
+        self,
+        symbol: str,
+        primary_candles: Sequence[Kline],
+        extra_candles: Mapping[str, Sequence[Kline]],
+    ) -> Iterable[Signal]:
+        candidates = self._identify_breakouts(primary_candles)
+        if not candidates:
+            return []
+
+        m30_candles = extra_candles.get("30m")
+        if not m30_candles:
+            return []
+
+        higher_trend = self._ema_trend(m30_candles)
+        if not higher_trend:
+            return []
+
+        trend_direction, ema_fast_value, ema_slow_value = higher_trend
+
+        signals: List[Signal] = []
+        for candidate in candidates:
+            side = candidate["side"]
+            metadata = dict(candidate["metadata"])
+            if side == "LONG" and trend_direction != "bullish":
+                continue
+            if side == "SHORT" and trend_direction != "bearish":
+                continue
+
+            metadata.update(
+                {
+                    "trend_timeframe": "30m",
+                    "higher_trend": trend_direction,
+                    "higher_ema_fast": ema_fast_value,
+                    "higher_ema_slow": ema_slow_value,
+                }
+            )
             signals.append(
                 self.make_signal(
                     symbol,
-                    "SHORT",
+                    side,
                     confidence=1.1,
                     metadata=metadata,
                 )

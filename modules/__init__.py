@@ -1,21 +1,9 @@
-"""Collection of strategy modules exposed by the package."""
+"""Strategy modules package.
 
-from .strategy_atr_ema_breakout import ATRBreakoutStrategy
-from .strategy_engulfing_rsi import EngulfingRSIStrategy
-from .strategy_inside_breakout import InsideBarVolumeBreakoutStrategy
-from .strategy_pinbar_level import PinBarLevelStrategy
-from .strategy_vwap_reversal import VWAPTrendReversalStrategy
-from .strategy_triple_ema import TripleEMASqueezeStrategy
-from .strategy_rsi_divergence import RSIDivergenceStrategy
-from .strategy_bollinger_squeeze import BollingerSqueezeBreakoutStrategy
+The orchestrator is responsible for discovering strategy implementations at
+runtime, therefore this package only needs to exist so Python treats
+``modules/`` as a namespace.  Keeping the ``__all__`` list empty prevents us
+from having to update it whenever a new strategy file is added.
+"""
 
-__all__ = [
-    "ATRBreakoutStrategy",
-    "EngulfingRSIStrategy",
-    "InsideBarVolumeBreakoutStrategy",
-    "PinBarLevelStrategy",
-    "VWAPTrendReversalStrategy",
-    "TripleEMASqueezeStrategy",
-    "RSIDivergenceStrategy",
-    "BollingerSqueezeBreakoutStrategy",
-]
+__all__: list[str] = []

@@ -1,27 +1,30 @@
-"""Range breakout strategy focused on intraday levels."""
+"""Range breakout strategy with volatility and volume confirmation."""
 
 from __future__ import annotations
 
-from statistics import fmean
-from typing import Iterable, List
+from typing import Iterable, Sequence
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
 
+from .strategy_shared import base_metadata, passes_sanity
+
 
 class RangeBreakoutStrategy(ModuleBase):
-    """Identify breakouts from a recent trading range on 15 minute bars."""
+    """Breakout of recent range with volume + ATR confirmation and trend gating."""
 
     def __init__(
         self,
         client,
         *,
         interval: str = "15m",
-        lookback: int = 60,
+        lookback: int = 240,
         breakout_window: int = 20,
         volume_window: int = 20,
+        volume_multiplier: float = 1.3,
+        min_atr_pct: float = 0.001,
     ) -> None:
-        minimum_history = max(breakout_window + 2, volume_window + 2, lookback)
+        minimum_history = max(lookback, breakout_window + 210, volume_window + 210, 220)
         super().__init__(
             client,
             name="RangeBreakout",
@@ -31,53 +34,61 @@ class RangeBreakoutStrategy(ModuleBase):
         )
         self._breakout_window = breakout_window
         self._volume_window = volume_window
+        self._volume_multiplier = volume_multiplier
+        self._min_atr_pct = min_atr_pct
 
-    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) < self._breakout_window + 1:
+    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+        bars = list(candles)
+        if len(bars) < self._breakout_window + 2:
             return []
 
-        breakout_candle = candles[-1]
-        prev_candle = candles[-2]
-        window = candles[-(self._breakout_window + 1) : -1]
-        resistance = max(candle.high for candle in window)
-        support = min(candle.low for candle in window)
+        meta = base_metadata(bars, vol_window=self._volume_window)
+        if not passes_sanity(meta, min_atr_pct=self._min_atr_pct, min_rel_vol=1.0):
+            return []
 
-        avg_volume = None
-        if len(candles) > self._volume_window:
-            volume_slice = candles[-(self._volume_window + 1) : -1]
-            avg_volume = fmean(c.volume for c in volume_slice)
+        window = bars[-(self._breakout_window + 1) : -1]
+        resistance = max(c.high for c in window)
+        support = min(c.low for c in window)
+        prev = bars[-2]
+        last = bars[-1]
 
-        signals: List[Signal] = []
+        rel_volume = meta["rel_volume"]
 
-        if breakout_candle.close > resistance and prev_candle.close <= resistance:
-            metadata = {
+        long_ok = (
+            last.close > resistance
+            and prev.close <= resistance
+            and rel_volume >= self._volume_multiplier
+            and meta["trend"] != "DOWN"
+        )
+        short_ok = (
+            last.close < support
+            and prev.close >= support
+            and rel_volume >= self._volume_multiplier
+            and meta["trend"] != "UP"
+        )
+
+        signals: list[Signal] = []
+        if long_ok:
+            strength = (last.close - resistance) / max(meta["atr"], 1e-9) + (rel_volume - 1.0)
+            meta_long = dict(meta)
+            meta_long.update({
+                "signal_strength": strength,
                 "breakout_level": resistance,
-                "previous_close": prev_candle.close,
-                "current_close": breakout_candle.close,
-            }
-            if avg_volume is not None:
-                metadata.update(
-                    {
-                        "volume": breakout_candle.volume,
-                        "avg_volume": avg_volume,
-                    }
-                )
-            signals.append(self.make_signal(symbol, "LONG", confidence=1.05, metadata=metadata))
+            })
+            meta_long["ref_price"] = resistance
+            confidence = min(1.25, 0.85 + 0.25 * max(0.0, strength))
+            signals.append(self.make_signal(symbol, "LONG", confidence=confidence, metadata=meta_long))
 
-        if breakout_candle.close < support and prev_candle.close >= support:
-            metadata = {
+        if short_ok:
+            strength = (support - last.close) / max(meta["atr"], 1e-9) + (rel_volume - 1.0)
+            meta_short = dict(meta)
+            meta_short.update({
+                "signal_strength": strength,
                 "breakdown_level": support,
-                "previous_close": prev_candle.close,
-                "current_close": breakout_candle.close,
-            }
-            if avg_volume is not None:
-                metadata.update(
-                    {
-                        "volume": breakout_candle.volume,
-                        "avg_volume": avg_volume,
-                    }
-                )
-            signals.append(self.make_signal(symbol, "SHORT", confidence=1.05, metadata=metadata))
+            })
+            meta_short["ref_price"] = support
+            confidence = min(1.25, 0.85 + 0.25 * max(0.0, strength))
+            signals.append(self.make_signal(symbol, "SHORT", confidence=confidence, metadata=meta_short))
 
         return signals
 

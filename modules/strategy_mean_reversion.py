@@ -1,27 +1,32 @@
-"""Mean reversion strategy using z-score of the last close."""
+"""Mean reversion strategy with z-score and reversal confirmation."""
+
 
 from __future__ import annotations
 
 from statistics import fmean, pstdev
-from typing import Iterable, List
+from typing import Iterable, Sequence
+
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
 
+from .strategy_shared import base_metadata, passes_sanity
+
 
 class MeanReversionStrategy(ModuleBase):
-    """Fade extremes when price deviates strongly from its moving average."""
+    """Fade extremes only against stretched z-score with reversal confirmation."""
 
     def __init__(
         self,
         client,
         *,
         interval: str = "15m",
-        lookback: int = 120,
-        window: int = 20,
+        lookback: int = 280,
+        window: int = 24,
         z_threshold: float = 2.0,
     ) -> None:
-        minimum_history = max(lookback, window + 2)
+        minimum_history = max(lookback, window + 220, 240)
+
         super().__init__(
             client,
             name="MeanReversion",
@@ -32,33 +37,68 @@ class MeanReversionStrategy(ModuleBase):
         self._window = window
         self._z_threshold = z_threshold
 
-    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) <= self._window:
+    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+        bars = list(candles)
+        if len(bars) <= self._window:
             return []
 
-        closes = [candle.close for candle in candles]
-        lookback_slice = closes[-self._window :]
-        avg_close = fmean(lookback_slice)
-        deviation = pstdev(lookback_slice)
-        if deviation == 0:
+        meta = base_metadata(bars)
+        if not passes_sanity(meta, min_atr_pct=0.0006, min_rel_vol=0.8):
             return []
 
-        last_close = closes[-1]
-        z_score = (last_close - avg_close) / deviation
-        metadata = {
-            "mean": avg_close,
-            "std_dev": deviation,
-            "z_score": z_score,
-            "last_close": last_close,
-        }
+        closes = [c.close for c in bars]
+        recent = closes[-self._window :]
+        mean = fmean(recent)
+        std = pstdev(recent) if len(recent) > 1 else 0.0
+        if std == 0:
+            return []
 
-        if z_score >= self._z_threshold:
-            return [self.make_signal(symbol, "SHORT", confidence=0.9, metadata=metadata)]
+        z_score = (closes[-1] - mean) / std
 
-        if z_score <= -self._z_threshold:
-            return [self.make_signal(symbol, "LONG", confidence=0.9, metadata=metadata)]
+        prev = bars[-2]
+        last = bars[-1]
 
-        return []
+        bull_reversal = (
+            z_score <= -self._z_threshold
+            and last.close > last.open
+            and prev.close < prev.open
+            and meta["trend"] != "DOWN"
+        )
+        bear_reversal = (
+            z_score >= self._z_threshold
+            and last.close < last.open
+            and prev.close > prev.open
+            and meta["trend"] != "UP"
+        )
+
+        meta["ref_price"] = mean
+
+        signals: list[Signal] = []
+        if bull_reversal:
+            strength = (-z_score) * (1.0 + meta["atr_pct"] * 40) * max(1.0, meta["rel_volume"])
+            meta_long = dict(meta)
+            meta_long.update({
+                "signal_strength": strength,
+                "z_score": z_score,
+                "mean": mean,
+                "std": std,
+            })
+            confidence = min(1.15, 0.75 + 0.2 * strength)
+            signals.append(self.make_signal(symbol, "LONG", confidence=confidence, metadata=meta_long))
+
+        if bear_reversal:
+            strength = (z_score) * (1.0 + meta["atr_pct"] * 40) * max(1.0, meta["rel_volume"])
+            meta_short = dict(meta)
+            meta_short.update({
+                "signal_strength": strength,
+                "z_score": z_score,
+                "mean": mean,
+                "std": std,
+            })
+            confidence = min(1.15, 0.75 + 0.2 * strength)
+            signals.append(self.make_signal(symbol, "SHORT", confidence=confidence, metadata=meta_short))
+
+        return signals
 
 
 __all__ = ["MeanReversionStrategy"]

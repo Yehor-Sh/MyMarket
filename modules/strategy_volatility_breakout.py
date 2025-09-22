@@ -1,27 +1,28 @@
-"""ATR style volatility breakout strategy."""
+"""ATR based volatility breakout strategy with adaptive thresholds."""
 
 from __future__ import annotations
 
-from statistics import fmean
-from typing import Iterable, List
+from typing import Iterable, Sequence
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
 
+from .strategy_shared import base_metadata, passes_sanity
+
 
 class VolatilityBreakoutStrategy(ModuleBase):
-    """Trigger when price expands beyond the recent range by an ATR multiple."""
+    """Expansion beyond recent range by ATR multiple, adaptive to current ATR% and volume."""
 
     def __init__(
         self,
         client,
         *,
         interval: str = "15m",
-        lookback: int = 80,
+        lookback: int = 240,
         atr_period: int = 15,
-        atr_multiplier: float = 1.0,
+        base_atr_multiplier: float = 0.9,
     ) -> None:
-        minimum_history = max(lookback, atr_period + 2)
+        minimum_history = max(lookback, atr_period + 210, 220)
         super().__init__(
             client,
             name="VolatilityBreakout",
@@ -30,39 +31,52 @@ class VolatilityBreakoutStrategy(ModuleBase):
             lookback=minimum_history,
         )
         self._atr_period = atr_period
-        self._atr_multiplier = atr_multiplier
+        self._base_atr_multiplier = base_atr_multiplier
 
-    def process(self, symbol: str, candles: List[Kline]) -> Iterable[Signal]:
-        if len(candles) <= self._atr_period:
+    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+        bars = list(candles)
+        if len(bars) <= self._atr_period:
             return []
 
-        last = candles[-1]
-        prev = candles[-2]
-        atr_sample = candles[-self._atr_period :]
-        ranges = [candle.high - candle.low for candle in atr_sample]
-        atr_value = fmean(ranges)
-        threshold = atr_value * self._atr_multiplier
+        meta = base_metadata(bars, atr_period=self._atr_period)
+        if not passes_sanity(meta, min_atr_pct=0.0009, min_rel_vol=0.9):
+            return []
 
-        signals: List[Signal] = []
-        price_delta = last.close - prev.close
+        last = bars[-1]
+        prev = bars[-2]
 
-        if price_delta > threshold:
-            metadata = {
-                "atr": atr_value,
-                "previous_close": prev.close,
-                "current_close": last.close,
-                "change": price_delta,
-            }
-            signals.append(self.make_signal(symbol, "LONG", confidence=1.0, metadata=metadata))
+        atr_value = meta["atr"]
+        if atr_value <= 0:
+            return []
 
-        if price_delta < -threshold:
-            metadata = {
-                "atr": atr_value,
-                "previous_close": prev.close,
-                "current_close": last.close,
-                "change": price_delta,
-            }
-            signals.append(self.make_signal(symbol, "SHORT", confidence=1.0, metadata=metadata))
+        dyn_multiplier = self._base_atr_multiplier * (1.0 + min(0.5, max(0.0, meta["atr_pct"] * 80)))
+        threshold = atr_value * dyn_multiplier
+        delta = last.close - prev.close
+
+        signals: list[Signal] = []
+        if delta > threshold and meta["trend"] != "DOWN" and meta["rel_volume"] >= 1.05:
+            strength = (delta / atr_value) * meta["rel_volume"]
+            meta_long = dict(meta)
+            meta_long.update({
+                "signal_strength": strength,
+                "ref_price": prev.close,
+                "price_delta": delta,
+                "atr_multiplier": dyn_multiplier,
+            })
+            confidence = min(1.2, 0.8 + 0.2 * strength)
+            signals.append(self.make_signal(symbol, "LONG", confidence=confidence, metadata=meta_long))
+
+        if delta < -threshold and meta["trend"] != "UP" and meta["rel_volume"] >= 1.05:
+            strength = (-delta / atr_value) * meta["rel_volume"]
+            meta_short = dict(meta)
+            meta_short.update({
+                "signal_strength": strength,
+                "ref_price": prev.close,
+                "price_delta": delta,
+                "atr_multiplier": dyn_multiplier,
+            })
+            confidence = min(1.2, 0.8 + 0.2 * strength)
+            signals.append(self.make_signal(symbol, "SHORT", confidence=confidence, metadata=meta_short))
 
         return signals
 

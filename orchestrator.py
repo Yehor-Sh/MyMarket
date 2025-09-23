@@ -228,29 +228,34 @@ class Orchestrator:
         self.default_mode = self._normalize_mode(self.config.get("mode")) or "live"
         self.mode: Optional[str] = None
         self.backtest_config: Dict[str, object] = dict(self.config.get("backtest", {}))
-        raw_strategy_overrides = self.backtest_config.get("strategy_parameters")
-        strategy_overrides: Dict[str, Dict[str, object]] = {}
-        if isinstance(raw_strategy_overrides, Mapping):
-            for key, value in raw_strategy_overrides.items():
-                if not isinstance(value, Mapping):
-                    continue
-                abbreviation = str(key).upper()
-                fields: Dict[str, object] = {}
-                for field_key, field_value in value.items():
-                    fields[str(field_key)] = field_value
-                if fields:
-                    strategy_overrides[abbreviation] = fields
-        self.strategy_overrides: Dict[str, Dict[str, object]] = strategy_overrides
-        self.backtest_config["strategy_parameters"] = self.strategy_overrides
-        if isinstance(self.config.get("backtest"), MutableMapping):
-            self.config["backtest"]["strategy_parameters"] = self.strategy_overrides
-        self.backtest_result: Optional[BacktestResult] = None
-        self._initialise_backtest_config_defaults()
+
+        # основные параметры
         self.trailing_percent = trailing_percent
         self.module_poll_interval = module_poll_interval
         self.max_closed_trades = max_closed_trades
         self.max_tracked_symbols = max_tracked_symbols
 
+        # подготовка пустых контейнеров
+        self.strategy_definitions: Dict[str, StrategyDefinition] = {}
+        self.strategies: Dict[str, ModuleBase] = {}
+        self.strategy_overrides: Dict[str, Dict[str, object]] = {}
+        self.backtest_result: Optional[BacktestResult] = None
+
+        # теперь можно прогнать дефолтные настройки (оно использует strategy_definitions)
+        self._initialise_backtest_config_defaults()
+
+        # после дефолтов — находим стратегии
+        self.strategies = self._discover_strategies()
+        self._sync_strategy_overrides()
+        self._synchronise_backtest_config()
+
+        # формируем список модулей
+        self.modules: List[ModuleBase] = [
+            self.strategies[key] for key in sorted(self.strategies)
+        ]
+        self.workers: List[ModuleWorker] = []
+
+        # трейды и прочее
         self.active_trades: Dict[str, Trade] = {}
         self.closed_trades: List[Trade] = []
         self._symbol_index: Dict[str, set[str]] = defaultdict(set)
@@ -262,18 +267,12 @@ class Orchestrator:
         self._signal_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        self.strategy_definitions: Dict[str, StrategyDefinition] = {}
-        self.strategies: Dict[str, ModuleBase] = self._discover_strategies()
-        self._sync_strategy_overrides()
-        self._synchronise_backtest_config()
-        self.modules: List[ModuleBase] = [
-            self.strategies[key] for key in sorted(self.strategies)
-        ]
-        self.workers: List[ModuleWorker] = []
-
+        # регистрируем слушателей и роуты
         self.client.add_price_listener(self._handle_price_update)
         self._register_routes()
         self._register_socket_handlers()
+
+
 
     # ------------------------------------------------------------------
     @staticmethod

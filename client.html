@@ -530,6 +530,183 @@
       line-height: 1.5;
     }
 
+    .config-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .config-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .config-status {
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      min-height: 1em;
+    }
+
+    .config-status.is-error {
+      color: var(--danger);
+    }
+
+    .config-status.is-success {
+      color: var(--accent);
+    }
+
+    .config-status.is-muted {
+      color: var(--text-secondary);
+    }
+
+    .config-modules {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .config-module {
+      margin: 0;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: var(--radius-md);
+      padding: 14px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .config-module legend {
+      padding: 0 6px;
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .config-module__description {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.04em;
+      line-height: 1.4;
+    }
+
+    .config-module__empty {
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.06em;
+    }
+
+    .config-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .config-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .config-field--checkbox {
+      gap: 4px;
+    }
+
+    .config-field__label {
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .config-input {
+      width: 100%;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      padding: 10px 12px;
+      font-size: 0.9rem;
+      transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+    }
+
+    .config-input:focus {
+      outline: none;
+      border-color: rgba(22, 199, 132, 0.45);
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 0 1px rgba(22, 199, 132, 0.35);
+    }
+
+    .config-input--select {
+      appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, 0.4) 50%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.4) 50%, transparent 50%);
+      background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 32px;
+    }
+
+    .config-input--checkbox {
+      width: auto;
+    }
+
+    .config-checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .config-checkbox input {
+      width: 18px;
+      height: 18px;
+    }
+
+    .config-field__hint {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.05em;
+      line-height: 1.4;
+    }
+
+    .config-actions {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .panel-action--primary {
+      background: rgba(22, 199, 132, 0.25);
+      border-color: rgba(22, 199, 132, 0.45);
+    }
+
+    .panel-action--primary:hover,
+    .panel-action--primary:focus-visible {
+      border-color: rgba(22, 199, 132, 0.6);
+      background: rgba(22, 199, 132, 0.35);
+    }
+
+    .panel-action--muted {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .panel-action:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
     .strategy-list {
       display: flex;
       flex-direction: column;
@@ -935,6 +1112,17 @@
     </div>
     <p class="panel-note">Выберите стратегию, чтобы отобразить только её сделки. "Все стратегии" возвращает полный список.</p>
     <div class="strategy-list" id="strategyList"></div>
+    <section class="panel-section config-section" id="strategyConfigSection" aria-live="polite">
+      <div class="panel-subtitle">Настройки стратегий</div>
+      <form class="config-form" id="strategyConfigForm" novalidate>
+        <div class="config-status is-muted" id="strategyConfigStatus" role="status" aria-live="polite"></div>
+        <div class="config-modules" id="strategyConfigModules"></div>
+        <div class="config-actions">
+          <button class="panel-action panel-action--muted" type="button" id="strategyConfigRefresh">Обновить</button>
+          <button class="panel-action panel-action--primary" type="submit" id="strategyConfigSubmit">Сохранить</button>
+        </div>
+      </form>
+    </section>
     <section class="panel-section">
       <div class="panel-subtitle">Состояние модулей</div>
       <div class="health-list" id="moduleHealth" aria-live="polite">
@@ -969,6 +1157,686 @@
     idle: 'idle',
     offline: 'offline'
   };
+
+  let strategyConfigData = [];
+  let strategyConfigLoading = false;
+  let strategyConfigError = null;
+  let strategyConfigSubmitting = false;
+  let strategyConfigSubmitStatus = '';
+  let strategyConfigSubmitError = '';
+  let strategyConfigLastFetch = 0;
+
+  function createDomKey(source, fallback) {
+    const value = source !== undefined && source !== null ? String(source) : '';
+    const slug = value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return (slug || fallback).replace(/^-+|-+$/g, '') || fallback;
+  }
+
+  function parseNumeric(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function normalizeFieldType(type, rawValue, field) {
+    const normalized = (type || '').toString().toLowerCase();
+    if (['int', 'integer', 'float', 'double', 'decimal', 'number', 'numeric'].includes(normalized)) {
+      return 'number';
+    }
+    if (['bool', 'boolean', 'checkbox', 'toggle', 'switch'].includes(normalized)) {
+      return 'checkbox';
+    }
+    if (['select', 'choice', 'choices', 'dropdown', 'enum', 'options'].includes(normalized)) {
+      return 'select';
+    }
+    const options = field && (field.options || field.choices || field.values || field.allowed || field.items);
+    if (Array.isArray(options) || (options && typeof options === 'object')) {
+      return 'select';
+    }
+    if (typeof rawValue === 'boolean') return 'checkbox';
+    if (typeof rawValue === 'number') return 'number';
+    if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim().toLowerCase();
+      if (trimmed === 'true' || trimmed === 'false') {
+        return 'checkbox';
+      }
+      if (trimmed !== '' && Number.isFinite(Number(trimmed))) {
+        return 'number';
+      }
+    }
+    return 'text';
+  }
+
+  function normalizeFieldOptions(field) {
+    const source = field.options || field.choices || field.values || field.allowed || field.items;
+    if (!source) return [];
+
+    const result = [];
+    if (Array.isArray(source)) {
+      source.forEach((item) => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const optionValue =
+            item.value !== undefined
+              ? item.value
+              : item.id !== undefined
+              ? item.id
+              : item.key !== undefined
+              ? item.key
+              : item.code !== undefined
+              ? item.code
+              : item.name !== undefined
+              ? item.name
+              : '';
+          const optionLabel =
+            item.label !== undefined
+              ? item.label
+              : item.title !== undefined
+              ? item.title
+              : item.name !== undefined
+              ? item.name
+              : item.text !== undefined
+              ? item.text
+              : optionValue;
+          result.push({
+            value: optionValue,
+            valueStr:
+              optionValue !== undefined && optionValue !== null ? String(optionValue) : '',
+            label:
+              optionLabel !== undefined && optionLabel !== null
+                ? String(optionLabel)
+                : ''
+          });
+        } else {
+          result.push({
+            value: item,
+            valueStr: item !== undefined && item !== null ? String(item) : '',
+            label: item !== undefined && item !== null ? String(item) : ''
+          });
+        }
+      });
+      return result;
+    }
+
+    if (typeof source === 'object') {
+      Object.entries(source).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value) && 'value' in value) {
+          const optionValue = value.value;
+          const optionLabel =
+            value.label !== undefined
+              ? value.label
+              : value.title !== undefined
+              ? value.title
+              : optionValue !== undefined && optionValue !== null
+              ? String(optionValue)
+              : String(key);
+          result.push({
+            value: optionValue,
+            valueStr:
+              optionValue !== undefined && optionValue !== null ? String(optionValue) : '',
+            label: optionLabel !== undefined && optionLabel !== null ? String(optionLabel) : ''
+          });
+        } else {
+          const optionLabel = value !== undefined && value !== null ? String(value) : String(key);
+          result.push({
+            value: key,
+            valueStr: key !== undefined && key !== null ? String(key) : '',
+            label: optionLabel
+          });
+        }
+      });
+    }
+
+    return result;
+  }
+
+  function extractStrategyConfigSource(payload) {
+    if (payload === undefined || payload === null) {
+      return { data: null, message: null };
+    }
+    if (Array.isArray(payload)) {
+      return { data: payload, message: null };
+    }
+    if (typeof payload !== 'object') {
+      return { data: payload, message: null };
+    }
+
+    const message = payload.message || null;
+    const keys = ['config', 'modules', 'parameters', 'data', 'strategies', 'items'];
+    for (const key of keys) {
+      if (payload[key] !== undefined) {
+        return { data: payload[key], message };
+      }
+    }
+
+    const clone = { ...payload };
+    delete clone.status;
+    delete clone.message;
+    if (Object.keys(clone).length === 0) {
+      return { data: null, message };
+    }
+    return { data: clone, message };
+  }
+
+  function normalizeStrategyConfigModules(source) {
+    if (!source) return [];
+
+    const modulesInput = [];
+    if (Array.isArray(source)) {
+      source.forEach((item) => {
+        if (item && typeof item === 'object') {
+          modulesInput.push(item);
+        }
+      });
+    } else if (typeof source === 'object') {
+      Object.entries(source).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          modulesInput.push({ key, ...value });
+        } else {
+          modulesInput.push({ key, fields: value });
+        }
+      });
+    }
+
+    return modulesInput.map((item, index) => {
+      const moduleIdentifier =
+        (typeof item.identifier === 'string' && item.identifier) ||
+        (typeof item.key === 'string' && item.key) ||
+        (typeof item.abbreviation === 'string' && item.abbreviation) ||
+        (typeof item.id === 'string' && item.id) ||
+        (typeof item.module === 'string' && item.module) ||
+        (typeof item.name === 'string' && item.name) ||
+        `module_${index}`;
+      const moduleName =
+        (typeof item.name === 'string' && item.name) ||
+        (typeof item.title === 'string' && item.title) ||
+        (typeof item.label === 'string' && item.label) ||
+        moduleIdentifier;
+      const moduleDescription =
+        (typeof item.description === 'string' && item.description) ||
+        (typeof item.summary === 'string' && item.summary) ||
+        (typeof item.help === 'string' && item.help) ||
+        '';
+      const moduleDomKey = `${createDomKey(moduleIdentifier, 'module')}-${index}`;
+
+      const fieldsSource =
+        item.fields || item.parameters || item.params || item.settings || item.config || item.options || {};
+
+      const fieldsInput = [];
+      if (Array.isArray(fieldsSource)) {
+        fieldsSource.forEach((entry, fieldIndex) => {
+          if (entry && typeof entry === 'object') {
+            fieldsInput.push(entry);
+          } else {
+            fieldsInput.push({ key: `field_${fieldIndex}`, value: entry });
+          }
+        });
+      } else if (typeof fieldsSource === 'object' && fieldsSource !== null) {
+        Object.entries(fieldsSource).forEach(([key, value]) => {
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            fieldsInput.push({ key, ...value });
+          } else {
+            fieldsInput.push({ key, value });
+          }
+        });
+      }
+
+      const fields = fieldsInput.map((entry, fieldIndex) => {
+        const fieldKey =
+          (typeof entry.key === 'string' && entry.key) ||
+          (typeof entry.id === 'string' && entry.id) ||
+          (typeof entry.code === 'string' && entry.code) ||
+          (typeof entry.name === 'string' && entry.name) ||
+          (typeof entry.field === 'string' && entry.field) ||
+          `field_${fieldIndex}`;
+        const fieldLabel =
+          (typeof entry.label === 'string' && entry.label) ||
+          (typeof entry.title === 'string' && entry.title) ||
+          (typeof entry.name === 'string' && entry.name) ||
+          (typeof entry.display_name === 'string' && entry.display_name) ||
+          fieldKey;
+        const rawValue =
+          entry.value !== undefined
+            ? entry.value
+            : entry.current !== undefined
+            ? entry.current
+            : entry.default !== undefined
+            ? entry.default
+            : entry.initial !== undefined
+            ? entry.initial
+            : entry.example !== undefined
+            ? entry.example
+            : entry.value;
+
+        let inputType = normalizeFieldType(entry.type || entry.input, rawValue, entry);
+        const options = normalizeFieldOptions(entry);
+        if (inputType === 'select' && !options.length) {
+          inputType = 'text';
+        }
+
+        const placeholder =
+          (typeof entry.placeholder === 'string' && entry.placeholder) ||
+          (typeof entry.hint === 'string' && entry.hint) ||
+          '';
+        const description =
+          (typeof entry.description === 'string' && entry.description) ||
+          (typeof entry.note === 'string' && entry.note) ||
+          (typeof entry.help === 'string' && entry.help) ||
+          '';
+        const min = parseNumeric(entry.min ?? entry.min_value ?? entry.minimum);
+        const max = parseNumeric(entry.max ?? entry.max_value ?? entry.maximum);
+        const step = parseNumeric(entry.step ?? entry.step_value ?? entry.increment);
+        const allowBlank = Boolean(
+          entry.allowBlank ?? entry.allow_blank ?? entry.optional ?? entry.nullable ?? entry.allow_empty
+        );
+
+        const fieldDomKey = `${moduleDomKey}-${createDomKey(fieldKey, 'field')}-${fieldIndex}`;
+        const domPath = `${moduleDomKey}__${createDomKey(fieldKey, 'field')}-${fieldIndex}`;
+
+        let value = rawValue;
+        let valueStr = rawValue !== undefined && rawValue !== null ? String(rawValue) : '';
+        let numericValue = null;
+
+        if (inputType === 'number') {
+          const parsed = Number(rawValue);
+          if (Number.isFinite(parsed)) {
+            value = parsed;
+            valueStr = String(parsed);
+            numericValue = parsed;
+          } else {
+            value = rawValue;
+            valueStr = rawValue !== undefined && rawValue !== null ? String(rawValue) : '';
+          }
+        } else if (inputType === 'checkbox') {
+          const boolValue = rawValue === true || rawValue === 'true' || rawValue === 1 || rawValue === '1';
+          value = boolValue;
+          valueStr = boolValue ? 'true' : 'false';
+        } else if (inputType === 'select') {
+          if (valueStr === '' && options.length) {
+            const selectedOption = options.find((option) => option.valueStr === '' || option.valueStr === undefined);
+            if (!selectedOption) {
+              // leave empty to avoid forcing selection
+            }
+          }
+        }
+
+        return {
+          key: fieldKey,
+          label: fieldLabel,
+          inputType,
+          options,
+          placeholder,
+          description,
+          min,
+          max,
+          step,
+          allowBlank,
+          value,
+          valueStr,
+          numericValue,
+          domKey: fieldDomKey,
+          domPath
+        };
+      });
+
+      return {
+        key: moduleIdentifier,
+        name: moduleName,
+        description: moduleDescription,
+        fields,
+        domKey: moduleDomKey
+      };
+    });
+  }
+
+  function renderStrategyConfigField(module, field, disableInputs) {
+    const inputId = `config-${field.domPath}`;
+    const disabledAttr = disableInputs ? ' disabled' : '';
+    const pathAttr = escapeHtml(field.domPath);
+    const moduleKeyAttr = escapeHtml(module.key);
+    const fieldKeyAttr = escapeHtml(field.key);
+
+    if (field.inputType === 'checkbox') {
+      const checkedAttr = field.value === true ? ' checked' : '';
+      const hint = field.description
+        ? `<div class="config-field__hint">${escapeHtml(field.description)}</div>`
+        : '';
+      return `
+        <div class="config-field config-field--checkbox">
+          <label class="config-checkbox">
+            <input type="checkbox" id="${inputId}" class="config-input config-input--checkbox" data-config-input data-config-path="${pathAttr}" data-module-key="${moduleKeyAttr}" data-field-key="${fieldKeyAttr}"${checkedAttr}${disabledAttr}>
+            <span>${safeText(field.label)}</span>
+          </label>
+          ${hint}
+        </div>
+      `;
+    }
+
+    if (field.inputType === 'select') {
+      const optionsHtml = field.options
+        .map((option) => {
+          const optionValue = option.valueStr !== undefined ? option.valueStr : option.value;
+          const optionLabel = option.label !== undefined ? option.label : optionValue;
+          const selected = optionValue === field.valueStr ? ' selected' : '';
+          return `<option value="${escapeHtml(optionValue ?? '')}"${selected}>${safeText(
+            optionLabel !== undefined && optionLabel !== null ? optionLabel : ''
+          )}</option>`;
+        })
+        .join('');
+
+      const placeholderOption = field.allowBlank
+        ? '<option value="">—</option>'
+        : '';
+      const hint = field.description
+        ? `<div class="config-field__hint">${escapeHtml(field.description)}</div>`
+        : '';
+
+      return `
+        <div class="config-field">
+          <label class="config-field__label" for="${inputId}">${safeText(field.label)}</label>
+          <select id="${inputId}" class="config-input config-input--select" data-config-input data-config-path="${pathAttr}" data-module-key="${moduleKeyAttr}" data-field-key="${fieldKeyAttr}"${disabledAttr}>
+            ${placeholderOption}${optionsHtml}
+          </select>
+          ${hint}
+        </div>
+      `;
+    }
+
+    const valueAttr = field.valueStr !== undefined ? ` value="${escapeHtml(field.valueStr)}"` : '';
+    const placeholderAttr = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
+    const minAttr = field.min !== null ? ` min="${field.min}"` : '';
+    const maxAttr = field.max !== null ? ` max="${field.max}"` : '';
+    const stepAttr = field.step !== null ? ` step="${field.step}"` : '';
+    const inputType = field.inputType === 'number' ? 'number' : 'text';
+    const hint = field.description
+      ? `<div class="config-field__hint">${escapeHtml(field.description)}</div>`
+      : '';
+
+    return `
+      <div class="config-field">
+        <label class="config-field__label" for="${inputId}">${safeText(field.label)}</label>
+        <input type="${inputType}" id="${inputId}" class="config-input" data-config-input data-config-path="${pathAttr}" data-module-key="${moduleKeyAttr}" data-field-key="${fieldKeyAttr}"${valueAttr}${placeholderAttr}${minAttr}${maxAttr}${stepAttr}${disabledAttr}>
+        ${hint}
+      </div>
+    `;
+  }
+
+  function renderStrategyConfigModule(module, disableInputs) {
+    const description = module.description
+      ? `<div class="config-module__description">${escapeHtml(module.description)}</div>`
+      : '';
+    const fieldsContent = module.fields.length
+      ? module.fields.map((field) => renderStrategyConfigField(module, field, disableInputs)).join('')
+      : '<div class="config-module__empty">Настраиваемых параметров нет.</div>';
+
+    return `
+      <fieldset class="config-module" data-config-module="${escapeHtml(module.key)}">
+        <legend class="config-module__title">${safeText(module.name)}</legend>
+        ${description}
+        <div class="config-fields">${fieldsContent}</div>
+      </fieldset>
+    `;
+  }
+
+  function renderStrategyConfig() {
+    const statusEl = document.getElementById('strategyConfigStatus');
+    const container = document.getElementById('strategyConfigModules');
+    const submitButton = document.getElementById('strategyConfigSubmit');
+    const refreshButton = document.getElementById('strategyConfigRefresh');
+    if (!statusEl || !container) return;
+
+    const disableInputs = strategyConfigLoading || strategyConfigSubmitting;
+    const isSocketConnected = socket && socket.connected;
+    if (submitButton) {
+      submitButton.disabled = disableInputs || !isSocketConnected;
+    }
+    if (refreshButton) {
+      refreshButton.disabled = strategyConfigLoading || !isSocketConnected;
+    }
+
+    let message = '';
+    let messageClass = '';
+
+    if (strategyConfigLoading) {
+      message = 'Загружаем текущие параметры…';
+      messageClass = 'is-muted';
+    } else if (strategyConfigError) {
+      message = strategyConfigError;
+      messageClass = 'is-error';
+    } else if (strategyConfigSubmitError) {
+      message = strategyConfigSubmitError;
+      messageClass = 'is-error';
+    } else if (strategyConfigSubmitStatus) {
+      message = strategyConfigSubmitStatus;
+      messageClass = 'is-success';
+    } else if (!strategyConfigData.length) {
+      message = strategyConfigLastFetch
+        ? 'Сервер не предоставил настраиваемых параметров.'
+        : 'Ожидаем данные от сервера…';
+      messageClass = 'is-muted';
+    }
+
+    statusEl.textContent = message;
+    statusEl.className = messageClass ? `config-status ${messageClass}` : 'config-status';
+
+    if (strategyConfigData.length) {
+      const modulesHtml = strategyConfigData
+        .map((module) => renderStrategyConfigModule(module, disableInputs))
+        .join('');
+      container.innerHTML = modulesHtml;
+    } else if (strategyConfigLoading) {
+      container.innerHTML = '';
+    } else {
+      container.innerHTML = '';
+    }
+  }
+
+  function applyStrategyConfigPayload(payload) {
+    const { data } = extractStrategyConfigSource(payload);
+    strategyConfigData = normalizeStrategyConfigModules(data);
+    strategyConfigError = null;
+    strategyConfigLastFetch = Date.now();
+    strategyConfigSubmitError = '';
+    renderStrategyConfig();
+  }
+
+  function requestStrategyConfig(force = false) {
+    if (!socket || !socket.connected) {
+      if (force) {
+        strategyConfigError = 'Нет соединения с сервером';
+        strategyConfigLoading = false;
+        renderStrategyConfig();
+      }
+      return;
+    }
+
+    if (strategyConfigLoading && !force) return;
+
+    const now = Date.now();
+    if (!force && strategyConfigData.length && now - strategyConfigLastFetch < 15000) {
+      return;
+    }
+
+    strategyConfigLoading = true;
+    strategyConfigError = null;
+    strategyConfigSubmitError = '';
+    renderStrategyConfig();
+
+    socket
+      .timeout(5000)
+      .emit('request_strategy_config', {}, (err, response) => {
+        strategyConfigLoading = false;
+        if (err) {
+          strategyConfigError = 'Сервер не ответил вовремя';
+          renderStrategyConfig();
+          return;
+        }
+        if (response && response.status && response.status !== 'ok') {
+          strategyConfigError = response.message || 'Не удалось получить параметры стратегий';
+          renderStrategyConfig();
+          return;
+        }
+        if (!response && !strategyConfigData.length) {
+          strategyConfigError = 'Сервер не предоставил параметры стратегий';
+          renderStrategyConfig();
+          return;
+        }
+        applyStrategyConfigPayload(response);
+      });
+  }
+
+  function collectStrategyConfigOverrides(form) {
+    const overrides = {};
+    let error = null;
+    let focusPath = null;
+
+    outer: for (const module of strategyConfigData) {
+      const moduleOverrides = {};
+      const moduleKey = module.key || module.name || module.domKey;
+      if (!moduleKey) continue;
+
+      for (const field of module.fields) {
+        const input = form.querySelector(`[data-config-path="${field.domPath}"]`);
+        if (!input) continue;
+
+        if (field.inputType === 'checkbox') {
+          const current = Boolean(input.checked);
+          if (current !== Boolean(field.value)) {
+            moduleOverrides[field.key] = current;
+          }
+          continue;
+        }
+
+        if (field.inputType === 'select') {
+          const selected = input.value;
+          if (selected === '') {
+            continue;
+          }
+
+          if (selected === field.valueStr) {
+            continue;
+          }
+
+          let nextValue = selected;
+          if (typeof field.value === 'number') {
+            const parsed = Number(selected);
+            if (!Number.isNaN(parsed)) {
+              nextValue = parsed;
+            }
+          } else if (typeof field.value === 'boolean') {
+            nextValue = selected === 'true';
+          }
+
+          moduleOverrides[field.key] = nextValue;
+          continue;
+        }
+
+        const raw = input.value.trim();
+        if (raw === '') {
+          continue;
+        }
+
+        if (field.inputType === 'number') {
+          const parsed = Number(raw);
+          if (!Number.isFinite(parsed)) {
+            error = `Поле «${field.label}» должно быть числом.`;
+            focusPath = field.domPath;
+            break outer;
+          }
+          if (field.min !== null && parsed < field.min) {
+            error = `Поле «${field.label}» должно быть не меньше ${field.min}.`;
+            focusPath = field.domPath;
+            break outer;
+          }
+          if (field.max !== null && parsed > field.max) {
+            error = `Поле «${field.label}» должно быть не больше ${field.max}.`;
+            focusPath = field.domPath;
+            break outer;
+          }
+
+          const original = Number(field.value);
+          if (Number.isFinite(original) && Math.abs(parsed - original) < 1e-12) {
+            continue;
+          }
+
+          moduleOverrides[field.key] = parsed;
+          continue;
+        }
+
+        if (raw === field.valueStr) {
+          continue;
+        }
+
+        moduleOverrides[field.key] = raw;
+      }
+
+      if (Object.keys(moduleOverrides).length) {
+        overrides[moduleKey] = moduleOverrides;
+      }
+    }
+
+    return { overrides, error, focusPath };
+  }
+
+  function handleStrategyConfigSubmit(event) {
+    event.preventDefault();
+    if (!ensureSocketConnected()) {
+      strategyConfigSubmitError = 'Нет соединения с сервером.';
+      strategyConfigSubmitStatus = '';
+      renderStrategyConfig();
+      return;
+    }
+    if (strategyConfigSubmitting) return;
+
+    const form = event.target;
+    const { overrides, error, focusPath } = collectStrategyConfigOverrides(form);
+    if (error) {
+      strategyConfigSubmitError = error;
+      strategyConfigSubmitStatus = '';
+      renderStrategyConfig();
+      if (focusPath) {
+        const input = form.querySelector(`[data-config-path="${focusPath}"]`);
+        if (input) input.focus();
+      }
+      return;
+    }
+
+    if (!overrides || Object.keys(overrides).length === 0) {
+      strategyConfigSubmitError = 'Измените параметры перед сохранением.';
+      strategyConfigSubmitStatus = '';
+      renderStrategyConfig();
+      return;
+    }
+
+    strategyConfigSubmitting = true;
+    strategyConfigSubmitError = '';
+    strategyConfigSubmitStatus = '';
+    renderStrategyConfig();
+
+    socket
+      .timeout(5000)
+      .emit('update_strategy_config', { overrides }, (err, response) => {
+        strategyConfigSubmitting = false;
+        if (err) {
+          strategyConfigSubmitError = 'Сервер не ответил вовремя.';
+          renderStrategyConfig();
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          strategyConfigSubmitError =
+            (response && response.message) || 'Не удалось сохранить параметры.';
+          renderStrategyConfig();
+          return;
+        }
+
+        strategyConfigSubmitStatus = response.message || 'Параметры обновлены.';
+        strategyConfigSubmitError = '';
+        renderStrategyConfig();
+        requestStrategyConfig(true);
+      });
+  }
 
   function normalizeMode(value) {
     if (!value && value !== 0) return null;
@@ -1317,6 +2185,9 @@
       moduleHealthLoading = false;
       lastHealthFetch = 0;
       renderModuleHealth();
+      strategyConfigError = null;
+      strategyConfigLoading = false;
+      renderStrategyConfig();
       if (!currentMode && !awaitingModeConfirmation) {
         setModePending(true);
       }
@@ -1327,6 +2198,7 @@
       updateModeButtonsState();
       requestTradesState();
       requestModuleHealth();
+      requestStrategyConfig(true);
     });
 
     socket.on('disconnect', (reason) => {
@@ -1334,6 +2206,10 @@
       moduleHealthLoading = false;
       moduleHealthError = 'Нет соединения с сервером';
       renderModuleHealth();
+      strategyConfigLoading = false;
+      strategyConfigSubmitting = false;
+      strategyConfigError = 'Нет соединения с сервером';
+      renderStrategyConfig();
       if (!currentMode) {
         awaitingModeConfirmation = false;
         pendingModeSelection = null;
@@ -1349,6 +2225,15 @@
     });
 
     socket.on('trades', handleTradesPayload);
+    socket.on('strategy_config', (payload) => {
+      strategyConfigLoading = false;
+      if (payload && payload.status && payload.status !== 'ok') {
+        strategyConfigError = payload.message || 'Не удалось получить параметры стратегий';
+        renderStrategyConfig();
+        return;
+      }
+      applyStrategyConfigPayload(payload);
+    });
   }
 
   function ensureSocketConnected() {
@@ -1626,6 +2511,8 @@
     document.getElementById('strategyToggle').setAttribute('aria-expanded', 'true');
     renderModuleHealth();
     requestModuleHealth();
+    renderStrategyConfig();
+    requestStrategyConfig();
   }
 
   function closeStrategyPanel() {
@@ -1663,6 +2550,16 @@
       });
     });
 
+    const configForm = document.getElementById('strategyConfigForm');
+    if (configForm) {
+      configForm.addEventListener('submit', handleStrategyConfigSubmit);
+    }
+    const configRefresh = document.getElementById('strategyConfigRefresh');
+    if (configRefresh) {
+      configRefresh.addEventListener('click', () => requestStrategyConfig(true));
+    }
+
+    renderStrategyConfig();
     setupSocket();
 
     document.getElementById('strategyToggle').addEventListener('click', toggleStrategyPanel);

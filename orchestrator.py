@@ -29,6 +29,10 @@ from module_worker import ModuleHealth, ModuleWorker
 _logger = logging.getLogger(__name__)
 
 
+class ModeAlreadySelectedError(RuntimeError):
+    """Raised when the orchestrator mode has already been chosen."""
+
+
 @dataclass
 class Trade:
     trade_id: str
@@ -155,7 +159,8 @@ class Orchestrator:
         self.app = Flask(__name__)
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.config = CONFIG
-        self.mode = str(self.config.get("mode", "live")).lower()
+        self.default_mode = self._normalize_mode(self.config.get("mode")) or "live"
+        self.mode: Optional[str] = None
         self.backtest_config: Dict[str, object] = dict(self.config.get("backtest", {}))
         self.backtest_result: Optional[BacktestResult] = None
         self.trailing_percent = trailing_percent
@@ -168,6 +173,7 @@ class Orchestrator:
         self._symbol_index: Dict[str, set[str]] = defaultdict(set)
         self._duplicate_guard: Dict[Tuple[str, str, str], str] = {}
         self._lock = threading.RLock()
+        self._mode_lock = threading.Lock()
 
         self.signal_queue: "queue.Queue[Signal]" = queue.Queue()
         self._signal_thread: Optional[threading.Thread] = None
@@ -184,6 +190,16 @@ class Orchestrator:
         self._register_socket_handlers()
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_mode(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        mode = str(value).strip().lower()
+        if mode in {"live", "backtest"}:
+            return mode
+        return None
+
+    # ------------------------------------------------------------------
     def _register_routes(self) -> None:
         static_dir = Path(__file__).resolve().parent
 
@@ -196,6 +212,28 @@ class Orchestrator:
         @self.socketio.on("connect")
         def _on_connect(auth=None):
             emit("trades", self._serialize_state())
+
+        @self.socketio.on("select_mode")
+        def _on_select_mode(data=None):
+            payload = data or {}
+            mode = payload.get("mode")
+            try:
+                started = self._activate_mode(mode)
+            except ValueError:
+                return {"status": "error", "message": "Неизвестный режим."}
+            except ModeAlreadySelectedError as exc:
+                return {
+                    "status": "error",
+                    "message": str(exc),
+                    "mode": self.mode,
+                }
+            except Exception:
+                _logger.exception("failed to activate mode %s", mode)
+                return {
+                    "status": "error",
+                    "message": "Не удалось запустить выбранный режим.",
+                }
+            return {"status": "ok", "mode": self.mode, "started": started}
 
         @self.socketio.on("request_state")
         def _on_request_state():
@@ -308,14 +346,27 @@ class Orchestrator:
         return discovered
 
     # ------------------------------------------------------------------
-    def start(self) -> None:
-        if self.mode == "backtest":
-            _logger.info("Starting orchestrator in backtest mode")
-            result = self._run_backtest()
-            self.backtest_result = result
-            self._broadcast_state()
+    def start(self, mode: Optional[str] = None) -> None:
+        target_mode = self._normalize_mode(mode) or self.default_mode
+        if target_mode not in {"live", "backtest"}:
+            _logger.warning(
+                "Unsupported orchestrator mode '%s'; defaulting to 'live'", target_mode
+            )
+            target_mode = "live"
+        try:
+            started = self._activate_mode(target_mode)
+        except ModeAlreadySelectedError as exc:
+            _logger.warning("%s", exc)
             return
+        except ValueError:
+            _logger.warning("Unsupported orchestrator mode '%s'; unable to start", mode)
+            return
+        if not started:
+            _logger.info("Orchestrator already running in %s mode", self.mode)
 
+    # ------------------------------------------------------------------
+    def _start_live_mode(self) -> None:
+        self.backtest_result = None
         self.client.start()
         try:
             self.client.get_liquid_pairs(force_refresh=True)
@@ -338,6 +389,43 @@ class Orchestrator:
         for worker in self.workers:
             worker.start()
 
+    # ------------------------------------------------------------------
+    def _activate_mode(self, mode: Optional[str]) -> bool:
+        normalized = self._normalize_mode(mode)
+        if not normalized:
+            raise ValueError(f"unsupported mode: {mode!r}")
+
+        conflict: Optional[str] = None
+        with self._mode_lock:
+            if self.mode is None:
+                self.mode = normalized
+            elif self.mode == normalized:
+                _logger.info("Mode %s already active", normalized)
+                return False
+            else:
+                conflict = self.mode
+
+        if conflict:
+            raise ModeAlreadySelectedError(
+                f"Режим уже выбран: {str(conflict).upper()}"
+            )
+
+        try:
+            if normalized == "backtest":
+                _logger.info("Starting orchestrator in backtest mode")
+                result = self._run_backtest()
+                self.backtest_result = result
+            else:
+                _logger.info("Starting orchestrator in live mode")
+                self._start_live_mode()
+        except Exception:
+            with self._mode_lock:
+                self.mode = None
+            raise
+
+        self._broadcast_state()
+        return True
+
     def stop(self) -> None:
         self._stop_event.set()
         for worker in self.workers:
@@ -347,6 +435,11 @@ class Orchestrator:
         self.client.stop()
         if self._signal_thread and self._signal_thread.is_alive():
             self._signal_thread.join(timeout=1.0)
+        self.workers = []
+        self._signal_thread = None
+        self.backtest_result = None
+        with self._mode_lock:
+            self.mode = None
 
     # ------------------------------------------------------------------
     def _run_backtest(self) -> Optional[BacktestResult]:
@@ -598,6 +691,7 @@ class Orchestrator:
                 "active": [],
                 "closed": closed_trades,
                 "server_time": server_time,
+                "mode": self.mode or "backtest",
             }
 
         with self._lock:
@@ -609,6 +703,7 @@ class Orchestrator:
             "active": active,
             "closed": closed,
             "server_time": server_time,
+            "mode": self.mode,
         }
 
     # ------------------------------------------------------------------
@@ -648,7 +743,6 @@ class Orchestrator:
 
 def create_app() -> Tuple[Flask, Orchestrator, SocketIO]:
     orchestrator = Orchestrator()
-    orchestrator.start()
     return orchestrator.app, orchestrator, orchestrator.socketio
 
 

@@ -42,6 +42,143 @@
       padding: 32px 18px 48px;
     }
 
+    body .page {
+      transition: filter var(--transition), opacity var(--transition);
+    }
+
+    body.mode-pending {
+      overflow: hidden;
+    }
+
+    body.mode-pending .page {
+      pointer-events: none;
+      user-select: none;
+      filter: blur(2px);
+      opacity: 0.35;
+    }
+
+    .mode-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.78);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 18px;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--transition);
+    }
+
+    .mode-overlay.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .mode-dialog {
+      background: var(--surface-elevated);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--surface-border-strong);
+      box-shadow: var(--shadow);
+      padding: 32px 28px;
+      max-width: 420px;
+      width: min(100%, 420px);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      text-align: center;
+      backdrop-filter: blur(24px);
+    }
+
+    .mode-dialog__title {
+      font-size: 1.45rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-primary);
+    }
+
+    .mode-dialog__subtitle {
+      font-size: 0.92rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .mode-dialog__actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    @media (min-width: 520px) {
+      .mode-dialog__actions {
+        flex-direction: row;
+      }
+    }
+
+    .mode-option {
+      flex: 1;
+      padding: 16px 20px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 0.95rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: transform var(--transition), border-color var(--transition), background var(--transition), opacity var(--transition);
+    }
+
+    .mode-option:hover,
+    .mode-option:focus-visible {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.28);
+      outline: none;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .mode-option.mode-option--live {
+      border-color: rgba(22, 199, 132, 0.4);
+    }
+
+    .mode-option.mode-option--backtest {
+      border-color: rgba(255, 109, 124, 0.4);
+    }
+
+    .mode-option.is-selected {
+      border-color: var(--accent);
+      background: rgba(22, 199, 132, 0.14);
+    }
+
+    .mode-option:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    .mode-dialog__status,
+    .mode-dialog__error {
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      line-height: 1.5;
+    }
+
+    .mode-dialog__status {
+      color: var(--text-secondary);
+    }
+
+    .mode-dialog__error {
+      color: var(--danger);
+      min-height: 0;
+    }
+
+    .mode-dialog__status:empty,
+    .mode-dialog__error:empty {
+      display: none;
+    }
+
     .page {
       width: min(1040px, 100%);
       display: flex;
@@ -685,7 +822,33 @@
     }
   </style>
 </head>
-<body>
+<body class="mode-pending">
+  <div
+    class="mode-overlay is-visible"
+    id="modeOverlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modeDialogTitle"
+    aria-hidden="false"
+  >
+    <div class="mode-dialog">
+      <div class="mode-dialog__title" id="modeDialogTitle">Выберите режим работы</div>
+      <p class="mode-dialog__subtitle">
+        Прежде чем продолжить, укажите режим запуска: «Live» для подключения к бирже или
+        «Backtest» для анализа исторических данных.
+      </p>
+      <div class="mode-dialog__actions">
+        <button type="button" class="mode-option mode-option--live" data-mode-option="live">
+          Live (онлайн)
+        </button>
+        <button type="button" class="mode-option mode-option--backtest" data-mode-option="backtest">
+          Backtest (история)
+        </button>
+      </div>
+      <div class="mode-dialog__status" id="modeStatus" role="status" aria-live="polite"></div>
+      <div class="mode-dialog__error" id="modeError" role="alert"></div>
+    </div>
+  </div>
   <div class="page">
     <header class="top-bar">
       <div class="metrics">
@@ -704,6 +867,7 @@
           </div>
         </div>
         <div class="selected-strategy">стратегия: <span id="selectedStrategyName">все стратегии</span></div>
+        <div class="selected-strategy selected-mode">режим: <span id="selectedModeValue">не выбран</span></div>
       </div>
       <button class="menu-toggle" id="strategyToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="strategyPanel">
         <span class="menu-toggle__label">стратегии</span>
@@ -788,6 +952,9 @@
   let tradesData = { active: [], closed: [] };
   let selectedStrategy = STRATEGY_ALL;
   let socket = null;
+  let currentMode = null;
+  let awaitingModeConfirmation = false;
+  let pendingModeSelection = null;
   const HEALTH_STATUS_LABELS = {
     ok: 'OK',
     error: 'Ошибка',
@@ -802,6 +969,140 @@
     idle: 'idle',
     offline: 'offline'
   };
+
+  function normalizeMode(value) {
+    if (!value && value !== 0) return null;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized === 'live' || normalized === 'backtest' ? normalized : null;
+  }
+
+  function getModeLabel(mode) {
+    const normalized = normalizeMode(mode);
+    if (normalized === 'backtest') return 'BACKTEST';
+    if (normalized === 'live') return 'LIVE';
+    return '—';
+  }
+
+  function updateSelectedModeLabel(mode) {
+    const el = document.getElementById('selectedModeValue');
+    if (!el) return;
+    const normalized = normalizeMode(mode);
+    if (!normalized) {
+      el.textContent = 'не выбран';
+      el.setAttribute('title', 'режим не выбран');
+      return;
+    }
+    const label = getModeLabel(normalized);
+    el.textContent = label;
+    el.setAttribute('title', label);
+  }
+
+  function updateModeButtonsState() {
+    document.querySelectorAll('[data-mode-option]').forEach((button) => {
+      const value = normalizeMode(button.getAttribute('data-mode-option'));
+      const isSelected = pendingModeSelection === value && awaitingModeConfirmation;
+      button.disabled = awaitingModeConfirmation;
+      button.classList.toggle('is-selected', isSelected);
+      button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+  }
+
+  function updateModeStatus(message) {
+    const statusEl = document.getElementById('modeStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message || '';
+  }
+
+  function updateModeError(message) {
+    const errorEl = document.getElementById('modeError');
+    if (!errorEl) return;
+    errorEl.textContent = message || '';
+  }
+
+  function setModePending(pending) {
+    const overlay = document.getElementById('modeOverlay');
+    const page = document.querySelector('.page');
+    document.body.classList.toggle('mode-pending', pending);
+    if (overlay) {
+      overlay.classList.toggle('is-visible', pending);
+      overlay.setAttribute('aria-hidden', pending ? 'false' : 'true');
+    }
+    if (page) {
+      if (pending) {
+        page.setAttribute('aria-hidden', 'true');
+      } else {
+        page.removeAttribute('aria-hidden');
+      }
+    }
+    if (pending && !awaitingModeConfirmation) {
+      pendingModeSelection = null;
+      updateModeButtonsState();
+      updateModeStatus('Выберите режим, чтобы продолжить.');
+      updateModeError('');
+    }
+  }
+
+  function applyServerMode(mode) {
+    const normalized = normalizeMode(mode);
+    if (normalized) {
+      currentMode = normalized;
+      awaitingModeConfirmation = false;
+      pendingModeSelection = null;
+      setModePending(false);
+      updateModeButtonsState();
+      updateModeStatus('');
+      updateModeError('');
+      updateSelectedModeLabel(normalized);
+      return;
+    }
+    currentMode = null;
+    updateSelectedModeLabel(null);
+    if (!awaitingModeConfirmation) {
+      setModePending(true);
+    }
+  }
+
+  function submitModeSelection(mode) {
+    const normalized = normalizeMode(mode);
+    if (!normalized) {
+      updateModeError('Неизвестный режим.');
+      return;
+    }
+    if (!socket || !socket.connected) {
+      updateModeError('Нет соединения с сервером.');
+      return;
+    }
+    awaitingModeConfirmation = true;
+    pendingModeSelection = normalized;
+    updateModeButtonsState();
+    updateModeStatus('Ожидаем подтверждение от сервера…');
+    updateModeError('');
+
+    socket
+      .timeout(5000)
+      .emit('select_mode', { mode: normalized }, (err, response) => {
+        awaitingModeConfirmation = false;
+        updateModeButtonsState();
+        if (err) {
+          updateModeError('Сервер не ответил вовремя.');
+          updateModeStatus('');
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          const message =
+            (response && response.message) || 'Не удалось выбрать режим. Попробуйте ещё раз.';
+          updateModeError(message);
+          updateModeStatus('');
+          return;
+        }
+
+        const confirmed = normalizeMode(response.mode) || normalized;
+        updateModeStatus('');
+        applyServerMode(confirmed);
+        requestTradesState();
+        requestModuleHealth(true);
+      });
+  }
   let moduleHealth = [];
   let moduleHealthLoading = false;
   let moduleHealthError = null;
@@ -993,6 +1294,11 @@
   }
 
   function handleTradesPayload(payload) {
+    if (payload && 'mode' in payload) {
+      applyServerMode(payload.mode);
+    } else if (!payload) {
+      applyServerMode(null);
+    }
     tradesData = normalizeTradesData(payload);
     updateUI();
   }
@@ -1011,6 +1317,14 @@
       moduleHealthLoading = false;
       lastHealthFetch = 0;
       renderModuleHealth();
+      if (!currentMode && !awaitingModeConfirmation) {
+        setModePending(true);
+      }
+      if (!currentMode) {
+        updateModeStatus('Выберите режим, чтобы продолжить.');
+        updateModeError('');
+      }
+      updateModeButtonsState();
       requestTradesState();
       requestModuleHealth();
     });
@@ -1020,6 +1334,14 @@
       moduleHealthLoading = false;
       moduleHealthError = 'Нет соединения с сервером';
       renderModuleHealth();
+      if (!currentMode) {
+        awaitingModeConfirmation = false;
+        pendingModeSelection = null;
+        updateModeButtonsState();
+        setModePending(true);
+        updateModeStatus('Нет соединения с сервером.');
+        updateModeError('');
+      }
     });
 
     socket.on('connect_error', (error) => {
@@ -1331,6 +1653,16 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    updateSelectedModeLabel(null);
+    setModePending(true);
+    updateModeButtonsState();
+    document.querySelectorAll('[data-mode-option]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const value = button.getAttribute('data-mode-option');
+        submitModeSelection(value);
+      });
+    });
+
     setupSocket();
 
     document.getElementById('strategyToggle').addEventListener('click', toggleStrategyPanel);

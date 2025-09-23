@@ -19,7 +19,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
 
-from binance_client import BinanceClient
+from backtest.engine import Backtester, BacktestResult, load_klines_from_csv
+from binance_client import BinanceClient, Kline
+from config import CONFIG
 from module_base import ModuleBase, Signal
 from module_worker import ModuleHealth, ModuleWorker
 
@@ -152,6 +154,10 @@ class Orchestrator:
         self.client = BinanceClient()
         self.app = Flask(__name__)
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        self.config = CONFIG
+        self.mode = str(self.config.get("mode", "live")).lower()
+        self.backtest_config: Dict[str, object] = dict(self.config.get("backtest", {}))
+        self.backtest_result: Optional[BacktestResult] = None
         self.trailing_percent = trailing_percent
         self.module_poll_interval = module_poll_interval
         self.max_closed_trades = max_closed_trades
@@ -303,6 +309,11 @@ class Orchestrator:
 
     # ------------------------------------------------------------------
     def start(self) -> None:
+        if self.mode == "backtest":
+            _logger.info("Starting orchestrator in backtest mode")
+            self.backtest_result = self._run_backtest()
+            return
+
         self.client.start()
         try:
             self.client.get_liquid_pairs(force_refresh=True)
@@ -334,6 +345,95 @@ class Orchestrator:
         self.client.stop()
         if self._signal_thread and self._signal_thread.is_alive():
             self._signal_thread.join(timeout=1.0)
+
+    # ------------------------------------------------------------------
+    def _run_backtest(self) -> Optional[BacktestResult]:
+        self.backtest_result = None
+        if not self.strategies:
+            _logger.warning("no strategy modules available for backtest")
+            return None
+
+        cfg = self.backtest_config
+        strategy_key = str(cfg.get("strategy") or "").upper()
+        strategy = self.strategies.get(strategy_key)
+        if not strategy:
+            strategy = next(iter(self.strategies.values()))
+            if strategy_key:
+                _logger.warning(
+                    "strategy %s not found; defaulting to %s",
+                    strategy_key,
+                    strategy.abbreviation,
+                )
+            strategy_key = strategy.abbreviation
+
+        symbol = str(cfg.get("symbol", "BTCUSDT")).upper()
+        interval = str(cfg.get("interval") or getattr(strategy, "interval", "1h"))
+        limit = int(cfg.get("limit") or max(strategy.lookback, strategy.minimum_bars))
+
+        candles: List[Kline] = []
+        csv_path = cfg.get("csv_path")
+        if csv_path:
+            try:
+                candles = load_klines_from_csv(csv_path)
+            except FileNotFoundError:
+                _logger.error("backtest CSV %s not found", csv_path)
+                return None
+            except Exception:
+                _logger.exception("failed to load backtest CSV %s", csv_path)
+                return None
+
+        if not candles:
+            try:
+                candles = self.client.fetch_klines(
+                    symbol,
+                    interval,
+                    limit,
+                    is_backtest=True,
+                )
+            except Exception:
+                _logger.exception(
+                    "failed to fetch historical klines for %s (%s)", symbol, interval
+                )
+                return None
+
+        if not candles:
+            _logger.error("no historical candles available for %s", symbol)
+            return None
+
+        trailing_percent = float(cfg.get("trailing_percent", self.trailing_percent))
+        enable_trailing = bool(cfg.get("enable_trailing", True))
+        initial_capital = float(cfg.get("initial_capital", 10_000.0))
+        commission_pct = float(cfg.get("commission_pct", 0.0))
+        report_directory = cfg.get("report_directory")
+
+        try:
+            backtester = Backtester(
+                strategy,
+                candles,
+                symbol=symbol,
+                trailing_percent=trailing_percent,
+                enable_trailing=enable_trailing,
+                initial_capital=initial_capital,
+                commission_pct=commission_pct,
+                report_directory=report_directory,
+            )
+            result = backtester.run()
+        except Exception:
+            _logger.exception("backtest execution failed for %s", symbol)
+            return None
+
+        self.backtest_result = result
+        metrics = result.metrics
+        _logger.info(
+            "Backtest for %s (%s) completed: return %.2f%%, win rate %.2f%%, sharpe %.2f",
+            symbol,
+            strategy.abbreviation,
+            metrics.get("total_return_pct", 0.0),
+            metrics.get("win_rate_pct", 0.0),
+            metrics.get("sharpe_ratio", 0.0),
+        )
+        _logger.info("Report stored in %s", result.report_directory)
+        return result
 
     # ------------------------------------------------------------------
     def _symbols_provider(self) -> Iterable[str]:

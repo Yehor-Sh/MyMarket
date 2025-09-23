@@ -17,6 +17,8 @@ collection, strategy evaluation and trade management.
   applies trailing stops and streams updates to the UI over WebSocket.
 - **`client.html`** – Lightweight dashboard that subscribes to WebSocket
   updates to display open and closed positions in real time.
+- **`backtest/`** – Offline backtesting engine with reporting utilities
+  (metrics and visualisations).
 
 ## Running locally
 
@@ -29,3 +31,25 @@ The web interface becomes available at <http://localhost:8080>.  The
 orchestrator automatically starts the Binance client and all strategy workers.
 Networking failures are tolerated – when the Binance API is unreachable the
 system continues to operate with the latest cached data.
+
+## Backtesting mode
+
+The project ships with an offline backtester that replays historical data bar
+by bar.  Configure the behaviour through `config.py`:
+
+```python
+CONFIG = {
+    "mode": "backtest",  # switch between "live" and "backtest"
+    "backtest": {
+        "symbol": "BTCUSDT",
+        "strategy": "ENG",  # strategy abbreviation
+        "csv_path": "data/BTCUSDT.csv",  # optional CSV with klines
+        "trailing_percent": 2.0,
+        "initial_capital": 10_000.0,
+    },
+}
+```
+
+When `mode` is set to `backtest`, running `python orchestrator.py` executes the
+selected strategy on the provided historical data and produces a report in the
+`backtest_reports/` directory (trades, metrics and PNG charts).

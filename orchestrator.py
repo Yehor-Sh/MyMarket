@@ -184,6 +184,35 @@ class StrategyDefinition:
 class Orchestrator:
     """Glue between market data, strategy modules and presentation layer."""
 
+    _BACKTEST_FIELD_ALIASES = {
+        "symbol": {"symbol", "ticker"},
+        "interval": {"interval", "timeframe"},
+        "csv_path": {"csvpath", "csvfile", "csv"},
+        "limit": {"limit", "bars", "candles", "count"},
+        "trailing_percent": {"trailingpercent", "trailingpct", "trailingpercentage"},
+        "enable_trailing": {"enabletrailing", "trailing", "enabletrailingstop"},
+        "initial_capital": {"initialcapital", "capital", "startingcapital"},
+        "commission_pct": {"commissionpct", "commission", "commissionpercent"},
+        "report_directory": {"reportdirectory", "reportdir", "reports"},
+        "strategy": {"strategy", "module", "primary", "primarystrategy"},
+        "selected_modules": {"selectedmodules", "modules", "strategies", "selection", "selected"},
+        "strategy_parameters": {"strategyparameters"},
+    }
+
+    _BACKTEST_FIELD_LABELS = {
+        "symbol": "Тикер",
+        "interval": "Интервал",
+        "csv_path": "CSV путь",
+        "limit": "Количество свечей",
+        "trailing_percent": "Trailing %",
+        "enable_trailing": "Включить трейлинг-стоп",
+        "initial_capital": "Начальный капитал",
+        "commission_pct": "Комиссия %",
+        "report_directory": "Каталог отчёта",
+        "strategy": "Стратегия",
+        "selected_modules": "Стратегии для бэктеста",
+    }
+
     def __init__(
         self,
         *,
@@ -216,6 +245,7 @@ class Orchestrator:
         if isinstance(self.config.get("backtest"), MutableMapping):
             self.config["backtest"]["strategy_parameters"] = self.strategy_overrides
         self.backtest_result: Optional[BacktestResult] = None
+        self._initialise_backtest_config_defaults()
         self.trailing_percent = trailing_percent
         self.module_poll_interval = module_poll_interval
         self.max_closed_trades = max_closed_trades
@@ -235,6 +265,7 @@ class Orchestrator:
         self.strategy_definitions: Dict[str, StrategyDefinition] = {}
         self.strategies: Dict[str, ModuleBase] = self._discover_strategies()
         self._sync_strategy_overrides()
+        self._synchronise_backtest_config()
         self.modules: List[ModuleBase] = [
             self.strategies[key] for key in sorted(self.strategies)
         ]
@@ -360,6 +391,183 @@ class Orchestrator:
             }
             if backtest_result:
                 response["backtest"] = backtest_result.to_dict()
+            return response
+
+        @self.socketio.on("request_backtest_config")
+        def _on_request_backtest_config(data=None):
+            payload = self._build_backtest_config_payload()
+            payload["status"] = "ok"
+            return payload
+
+        @self.socketio.on("update_backtest_config")
+        def _on_update_backtest_config(data=None):
+            payload = data or {}
+            overrides_payload = (
+                payload.get("overrides")
+                or payload.get("updates")
+                or payload.get("config")
+            )
+            if overrides_payload is None:
+                return {
+                    "status": "error",
+                    "message": "Не переданы изменения параметров.",
+                }
+            try:
+                overrides = self._normalize_backtest_overrides(
+                    overrides_payload,
+                    validate_modules=True,
+                )
+            except ValueError as exc:
+                return {"status": "error", "message": str(exc)}
+
+            if not overrides:
+                return {"status": "error", "message": "Изменения не обнаружены."}
+
+            changed = self._apply_backtest_overrides(overrides)
+            if not changed:
+                return {"status": "error", "message": "Изменения не обнаружены."}
+
+            self.backtest_result = None
+            payload = self._build_backtest_config_payload()
+            response: Dict[str, Any] = {
+                "status": "ok",
+                "message": "Настройки обновлены.",
+            }
+            response.update(payload)
+            self.socketio.emit("backtest_config", response)
+            self._broadcast_state()
+            return response
+
+        @self.socketio.on("run_backtest")
+        def _on_run_backtest(data=None):
+            if not self.strategy_definitions:
+                return {"status": "error", "message": "Стратегии недоступны."}
+
+            payload = data or {}
+            overrides_payload = (
+                payload.get("overrides")
+                or payload.get("updates")
+                or payload.get("config")
+            )
+            modules_payload = (
+                payload.get("modules")
+                or payload.get("strategies")
+                or payload.get("selection")
+                or payload.get("selected")
+            )
+
+            raw_overrides: Dict[str, object] = {}
+            if isinstance(overrides_payload, Mapping):
+                raw_overrides.update(overrides_payload)
+            elif overrides_payload not in (None, {}):
+                return {
+                    "status": "error",
+                    "message": "Некорректные параметры настроек бэктеста.",
+                }
+
+            if modules_payload is not None:
+                raw_overrides["selected_modules"] = modules_payload
+
+            preferred_hint = (
+                payload.get("strategy")
+                or payload.get("module")
+                or payload.get("primary")
+                or payload.get("primary_strategy")
+                or payload.get("primaryStrategy")
+            )
+            if preferred_hint is not None:
+                raw_overrides["strategy"] = preferred_hint
+
+            try:
+                overrides = self._normalize_backtest_overrides(
+                    raw_overrides,
+                    validate_modules=True,
+                )
+            except ValueError as exc:
+                return {"status": "error", "message": str(exc)}
+
+            modules = overrides.get("selected_modules")
+            if modules is None:
+                try:
+                    modules = self._normalize_strategy_selection(
+                        self.backtest_config.get("selected_modules"),
+                        validate=True,
+                    )
+                except ValueError as exc:
+                    return {"status": "error", "message": str(exc)}
+                overrides["selected_modules"] = modules
+
+            if not modules:
+                return {
+                    "status": "error",
+                    "message": "Выберите хотя бы одну стратегию для бэктеста.",
+                }
+
+            primary = overrides.get("strategy")
+            if primary is None:
+                existing_primary = self._normalize_strategy_key(
+                    self.backtest_config.get("strategy")
+                )
+                if existing_primary and existing_primary in modules:
+                    primary = existing_primary
+                else:
+                    primary = modules[0]
+                overrides["strategy"] = primary
+            elif primary not in modules:
+                primary = modules[0]
+                overrides["strategy"] = primary
+
+            self._apply_backtest_overrides(overrides)
+            self.backtest_result = None
+
+            results: Dict[str, Dict[str, object]] = {}
+            failures: Dict[str, str] = {}
+
+            other_modules = [code for code in modules if code != primary]
+            for code in other_modules:
+                result = self._run_backtest(strategy_key=code, update_state=False)
+                if result:
+                    results[code] = result.to_dict()
+                else:
+                    failures[code] = "Не удалось выполнить бэктест."
+
+            primary_result = self._run_backtest(strategy_key=primary, update_state=True)
+            if primary_result:
+                results[primary] = primary_result.to_dict()
+            else:
+                failures[primary] = "Не удалось выполнить бэктест."
+
+            if primary not in results:
+                response_payload = self._build_backtest_config_payload()
+                error_response: Dict[str, Any] = {
+                    "status": "error",
+                    "message": "Не удалось выполнить бэктест.",
+                }
+                if failures:
+                    error_response["failed"] = failures
+                if results:
+                    error_response["results"] = results
+                error_response.update(response_payload)
+                self.socketio.emit("backtest_config", error_response)
+                self._broadcast_state()
+                return error_response
+
+            message = "Бэктест выполнен."
+            if failures:
+                failed_list = ", ".join(sorted(failures))
+                message = f"Бэктест выполнен не для всех стратегий ({failed_list})."
+
+            response_payload = self._build_backtest_config_payload()
+            response: Dict[str, Any] = {
+                "status": "ok",
+                "message": message,
+                "results": results,
+            }
+            if failures:
+                response["failed"] = failures
+            response.update(response_payload)
+            self.socketio.emit("backtest_config", response)
+            self._broadcast_state()
             return response
 
     # ------------------------------------------------------------------
@@ -660,6 +868,394 @@ class Orchestrator:
         return modules
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _canonicalize_backtest_key(value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return "".join(ch for ch in text.lower() if ch.isalnum())
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def _resolve_backtest_field(cls, key: object) -> Optional[str]:
+        canonical = cls._canonicalize_backtest_key(key)
+        if not canonical:
+            return None
+        for field, aliases in cls._BACKTEST_FIELD_ALIASES.items():
+            field_canonical = cls._canonicalize_backtest_key(field)
+            if canonical == field_canonical or canonical in aliases:
+                return field
+        return None
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_strategy_key(value: object) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+        else:
+            text = str(value).strip()
+        if not text:
+            return None
+        return text.upper()
+
+    # ------------------------------------------------------------------
+    def _normalize_strategy_selection(
+        self,
+        selection: object,
+        *,
+        validate: bool = True,
+    ) -> List[str]:
+        if selection is None:
+            return []
+
+        if isinstance(selection, str):
+            values: Iterable[object] = [selection]
+        elif isinstance(selection, Mapping):
+            values = selection.values()
+        elif isinstance(selection, Iterable):
+            values = selection
+        else:
+            values = [selection]
+
+        available = set(self.strategy_definitions) if self.strategy_definitions else set()
+        if validate and not available:
+            raise ValueError("Стратегии недоступны для бэктеста.")
+
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for item in values:
+            key = self._normalize_strategy_key(item)
+            if not key or key in seen:
+                continue
+            if available and key not in available:
+                if validate:
+                    raise ValueError(f"Стратегия «{item}» не найдена.")
+                continue
+            seen.add(key)
+            normalized.append(key)
+
+        return normalized
+
+    # ------------------------------------------------------------------
+    def _coerce_backtest_value(
+        self,
+        key: str,
+        value: object,
+        *,
+        validate_modules: bool,
+    ) -> Tuple[bool, object]:
+        label = self._BACKTEST_FIELD_LABELS.get(key, key)
+
+        if key == "selected_modules":
+            if value is None:
+                return False, []
+            modules = self._normalize_strategy_selection(value, validate=validate_modules)
+            return True, modules
+
+        if key == "enable_trailing":
+            if value is None:
+                return False, False
+            if isinstance(value, bool):
+                return True, value
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return True, bool(value)
+            if isinstance(value, str):
+                text = value.strip().lower()
+                if not text:
+                    return False, False
+                if text in {"1", "true", "yes", "y", "on", "да"}:
+                    return True, True
+                if text in {"0", "false", "no", "n", "off", "нет"}:
+                    return True, False
+            raise ValueError(f"Поле «{label}» должно быть булевым значением (да/нет).")
+
+        if key in {"limit"}:
+            if value is None:
+                return False, 0
+            if isinstance(value, bool):
+                raise ValueError(f"Поле «{label}» должно быть числом.")
+            if isinstance(value, int):
+                return True, value
+            if isinstance(value, float):
+                if not value.is_integer():
+                    raise ValueError(f"Поле «{label}» должно быть целым числом.")
+                return True, int(value)
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return False, 0
+                try:
+                    number = float(text)
+                except ValueError as exc:  # pragma: no cover - defensive
+                    raise ValueError(f"Поле «{label}» должно быть целым числом.") from exc
+                if not number.is_integer():
+                    raise ValueError(f"Поле «{label}» должно быть целым числом.")
+                return True, int(number)
+            raise ValueError(f"Поле «{label}» должно быть целым числом.")
+
+        if key in {"trailing_percent", "initial_capital", "commission_pct"}:
+            if value is None:
+                return False, 0.0
+            if isinstance(value, bool):
+                raise ValueError(f"Поле «{label}» должно быть числом.")
+            if isinstance(value, (int, float)):
+                return True, float(value)
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return False, 0.0
+                try:
+                    return True, float(text)
+                except ValueError as exc:  # pragma: no cover - defensive
+                    raise ValueError(f"Поле «{label}» должно быть числом.") from exc
+            raise ValueError(f"Поле «{label}» должно быть числом.")
+
+        if key in {"symbol", "interval", "csv_path", "report_directory", "strategy"}:
+            if value is None:
+                if key in {"csv_path", "report_directory"}:
+                    return True, None
+                return False, ""
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return False, ""
+            else:
+                text = str(value).strip()
+            if not text:
+                return False, ""
+            if key == "symbol":
+                return True, text.upper()
+            if key == "strategy":
+                normalized = text.upper()
+                if validate_modules and self.strategy_definitions and normalized not in self.strategy_definitions:
+                    raise ValueError(f"Стратегия «{text}» не найдена.")
+                return True, normalized
+            if key == "csv_path" or key == "report_directory":
+                return True, text
+            return True, text
+
+        return False, value
+
+    # ------------------------------------------------------------------
+    def _normalize_backtest_overrides(
+        self,
+        overrides: object,
+        *,
+        validate_modules: bool = True,
+    ) -> Dict[str, object]:
+        if overrides is None:
+            return {}
+        if not isinstance(overrides, Mapping):
+            raise ValueError("Некорректные данные настроек бэктеста.")
+
+        normalized: Dict[str, object] = {}
+        for raw_key, raw_value in overrides.items():
+            key = self._resolve_backtest_field(raw_key)
+            if not key or key == "strategy_parameters":
+                continue
+            apply_value, coerced = self._coerce_backtest_value(
+                key,
+                raw_value,
+                validate_modules=validate_modules,
+            )
+            if not apply_value:
+                continue
+            if key == "selected_modules" and not coerced:
+                normalized[key] = []
+                continue
+            normalized[key] = coerced
+
+        return normalized
+
+    # ------------------------------------------------------------------
+    def _persist_backtest_config(self) -> None:
+        target = self.config.setdefault("backtest", {})
+        if not isinstance(target, MutableMapping):
+            return
+
+        for key, value in self.backtest_config.items():
+            if key == "strategy_parameters":
+                target[key] = self.strategy_overrides
+                continue
+            if key == "selected_modules":
+                target[key] = (
+                    list(value)
+                    if isinstance(value, Iterable) and not isinstance(value, (str, bytes))
+                    else []
+                )
+                continue
+            target[key] = value
+
+    # ------------------------------------------------------------------
+    def _apply_backtest_overrides(
+        self,
+        overrides: Mapping[str, object],
+        *,
+        persist: bool = True,
+    ) -> bool:
+        if not overrides:
+            return False
+
+        changed = False
+        for key, value in overrides.items():
+            if key == "strategy_parameters":
+                continue
+            if key == "selected_modules":
+                existing = self.backtest_config.get(key)
+                current = (
+                    list(existing)
+                    if isinstance(existing, Iterable) and not isinstance(existing, (str, bytes))
+                    else []
+                )
+                if current != list(value):
+                    self.backtest_config[key] = list(value)
+                    changed = True
+                continue
+            if key in {"csv_path", "report_directory"} and value is None:
+                if self.backtest_config.get(key) is not None:
+                    self.backtest_config[key] = None
+                    changed = True
+                continue
+            if self.backtest_config.get(key) != value:
+                self.backtest_config[key] = value
+                changed = True
+
+        if changed and persist:
+            self._persist_backtest_config()
+
+        return changed
+
+    # ------------------------------------------------------------------
+    def _build_backtest_available_modules(self) -> List[Dict[str, object]]:
+        modules: List[Dict[str, object]] = []
+        for key in sorted(self.strategy_definitions):
+            definition = self.strategy_definitions[key]
+            modules.append(
+                {
+                    "value": definition.abbreviation,
+                    "label": definition.name,
+                    "name": definition.name,
+                    "abbreviation": definition.abbreviation,
+                    "description": definition.description,
+                }
+            )
+        return modules
+
+    # ------------------------------------------------------------------
+    def _build_backtest_config_payload(self) -> Dict[str, object]:
+        config: Dict[str, object] = {}
+        for key in (
+            "symbol",
+            "interval",
+            "strategy",
+            "csv_path",
+            "limit",
+            "trailing_percent",
+            "enable_trailing",
+            "initial_capital",
+            "commission_pct",
+            "report_directory",
+        ):
+            if key in self.backtest_config:
+                config[key] = self.backtest_config.get(key)
+
+        selection = self.backtest_config.get("selected_modules")
+        if isinstance(selection, Iterable) and not isinstance(selection, (str, bytes)):
+            config["selected_modules"] = list(selection)
+        else:
+            config["selected_modules"] = []
+
+        config["strategy_parameters"] = self.strategy_overrides
+
+        payload: Dict[str, object] = {
+            "config": config,
+            "available_modules": self._build_backtest_available_modules(),
+        }
+        if self.backtest_result:
+            payload["backtest"] = self.backtest_result.to_dict()
+        return payload
+
+    # ------------------------------------------------------------------
+    def _initialise_backtest_config_defaults(self) -> None:
+        try:
+            normalized = self._normalize_backtest_overrides(
+                self.backtest_config,
+                validate_modules=False,
+            )
+        except ValueError:
+            normalized = {}
+
+        base: Dict[str, object] = {
+            "symbol": "BTCUSDT",
+            "interval": "1h",
+            "strategy": None,
+            "csv_path": None,
+            "limit": None,
+            "trailing_percent": float(self.backtest_config.get("trailing_percent", self.trailing_percent)),
+            "enable_trailing": bool(self.backtest_config.get("enable_trailing", True)),
+            "initial_capital": float(self.backtest_config.get("initial_capital", 10_000.0)),
+            "commission_pct": float(self.backtest_config.get("commission_pct", 0.0)),
+            "report_directory": self.backtest_config.get("report_directory"),
+            "selected_modules": [],
+        }
+
+        base.update(normalized)
+
+        symbol = self._normalize_strategy_key(base.get("symbol"))
+        if symbol:
+            base["symbol"] = symbol
+
+        strategy = self._normalize_strategy_key(base.get("strategy"))
+        if strategy:
+            base["strategy"] = strategy
+        else:
+            base.pop("strategy", None)
+
+        selection = base.get("selected_modules")
+        base["selected_modules"] = self._normalize_strategy_selection(
+            selection,
+            validate=False,
+        )
+
+        if strategy and strategy not in base["selected_modules"]:
+            base["selected_modules"].insert(0, strategy)
+
+        self.backtest_config = base
+        self.backtest_config["strategy_parameters"] = self.strategy_overrides
+        self._persist_backtest_config()
+
+    # ------------------------------------------------------------------
+    def _synchronise_backtest_config(self) -> None:
+        selection = self._normalize_strategy_selection(
+            self.backtest_config.get("selected_modules"),
+            validate=False,
+        )
+
+        available = set(self.strategy_definitions)
+        filtered = [code for code in selection if code in available]
+
+        strategy = self._normalize_strategy_key(self.backtest_config.get("strategy"))
+        if strategy and strategy in available:
+            if strategy not in filtered:
+                filtered.insert(0, strategy)
+        elif filtered:
+            strategy = filtered[0]
+            self.backtest_config["strategy"] = strategy
+        elif available:
+            strategy = next(iter(sorted(available)))
+            filtered = [strategy]
+            self.backtest_config["strategy"] = strategy
+        else:
+            strategy = None
+            filtered = []
+            self.backtest_config.pop("strategy", None)
+
+        self.backtest_config["selected_modules"] = filtered
+        self.backtest_config["strategy_parameters"] = self.strategy_overrides
+        self._persist_backtest_config()
+
     def _coerce_parameter_value(
         self,
         meta: StrategyParameterDefinition,
@@ -967,15 +1563,37 @@ class Orchestrator:
             self.mode = None
 
     # ------------------------------------------------------------------
-    def _run_backtest(self) -> Optional[BacktestResult]:
-        self.backtest_result = None
+    def _run_backtest(
+        self,
+        *,
+        config: Optional[Mapping[str, object]] = None,
+        strategy_key: Optional[str] = None,
+        update_state: bool = True,
+    ) -> Optional[BacktestResult]:
+        if update_state:
+            self.backtest_result = None
         if not self.strategy_definitions:
             _logger.warning("no strategy modules available for backtest")
             return None
 
-        cfg = self.backtest_config
-        strategy_key = str(cfg.get("strategy") or "").upper()
-        definition = self.strategy_definitions.get(strategy_key)
+        cfg: Dict[str, object] = dict(self.backtest_config)
+        if config:
+            for key, value in config.items():
+                cfg[str(key)] = value
+        if strategy_key is not None:
+            cfg["strategy"] = strategy_key
+
+        requested_strategy = self._normalize_strategy_key(cfg.get("strategy"))
+        definition: Optional[StrategyDefinition] = None
+        if requested_strategy:
+            definition = self.strategy_definitions.get(requested_strategy)
+            if not definition and strategy_key is not None:
+                _logger.warning(
+                    "strategy %s not found; unable to run backtest",
+                    requested_strategy,
+                )
+                return None
+
         if not definition:
             available = sorted(self.strategy_definitions)
             if not available:
@@ -983,18 +1601,29 @@ class Orchestrator:
                 return None
             fallback_key = available[0]
             definition = self.strategy_definitions[fallback_key]
-            if strategy_key:
+            if requested_strategy:
                 _logger.warning(
                     "strategy %s not found; defaulting to %s",
-                    strategy_key,
+                    requested_strategy,
                     definition.abbreviation,
                 )
-            strategy_key = definition.abbreviation
-            cfg["strategy"] = strategy_key
-            if isinstance(self.config.get("backtest"), MutableMapping):
-                self.config["backtest"]["strategy"] = strategy_key
+            requested_strategy = definition.abbreviation
+            cfg["strategy"] = requested_strategy
+            if update_state:
+                self.backtest_config["strategy"] = requested_strategy
+                selection = self._normalize_strategy_selection(
+                    self.backtest_config.get("selected_modules"),
+                    validate=False,
+                )
+                if requested_strategy not in selection:
+                    selection.insert(0, requested_strategy)
+                    self.backtest_config["selected_modules"] = selection
+                self._persist_backtest_config()
 
-        overrides = self.strategy_overrides.get(strategy_key, {})
+        if not definition:
+            return None
+
+        overrides = self.strategy_overrides.get(requested_strategy, {})
         try:
             strategy = self._instantiate_strategy(definition, overrides)
         except Exception:
@@ -1004,7 +1633,7 @@ class Orchestrator:
             )
             return None
 
-        symbol = str(cfg.get("symbol", "BTCUSDT")).upper()
+        symbol = self._normalize_strategy_key(cfg.get("symbol")) or "BTCUSDT"
         interval = str(cfg.get("interval") or getattr(strategy, "interval", "1h"))
         limit_value = cfg.get("limit")
         if limit_value is None:
@@ -1067,7 +1696,8 @@ class Orchestrator:
             _logger.exception("backtest execution failed for %s", symbol)
             return None
 
-        self.backtest_result = result
+        if update_state:
+            self.backtest_result = result
         metrics = result.metrics
         _logger.info(
             "Backtest for %s (%s) completed: return %.2f%%, win rate %.2f%%, sharpe %.2f",
@@ -1226,35 +1856,45 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _serialize_state(self) -> Dict[str, object]:
         server_time = datetime.now(UTC).isoformat()
+        payload: Dict[str, object] = {
+            "server_time": server_time,
+            "backtest_config": self._build_backtest_config_payload(),
+        }
+        if self.backtest_result:
+            payload["backtest"] = self.backtest_result.to_dict()
 
         if self.mode == "backtest" and self.backtest_result:
             strategy_key = self.backtest_result.strategy
             closed_trades: List[Dict[str, object]] = []
             for trade in self.backtest_result.trades:
-                payload = dict(trade)
-                if not payload.get("strategy"):
-                    payload["strategy"] = strategy_key
-                if not payload.get("module"):
-                    payload["module"] = strategy_key
-                closed_trades.append(payload)
-            return {
-                "active": [],
-                "closed": closed_trades,
-                "server_time": server_time,
-                "mode": self.mode or "backtest",
-            }
+                trade_payload = dict(trade)
+                if not trade_payload.get("strategy"):
+                    trade_payload["strategy"] = strategy_key
+                if not trade_payload.get("module"):
+                    trade_payload["module"] = strategy_key
+                closed_trades.append(trade_payload)
+            payload.update(
+                {
+                    "active": [],
+                    "closed": closed_trades,
+                    "mode": self.mode or "backtest",
+                }
+            )
+            return payload
 
         with self._lock:
             active = [trade.to_dict() for trade in self.active_trades.values()]
             closed = [trade.to_dict() for trade in self.closed_trades]
         active.sort(key=lambda x: x["opened_at"], reverse=True)
         closed.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
-        return {
-            "active": active,
-            "closed": closed,
-            "server_time": server_time,
-            "mode": self.mode,
-        }
+        payload.update(
+            {
+                "active": active,
+                "closed": closed,
+                "mode": self.mode,
+            }
+        )
+        return payload
 
     # ------------------------------------------------------------------
     def get_modules_health(self) -> List[Dict[str, object]]:

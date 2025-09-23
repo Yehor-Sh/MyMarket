@@ -3087,35 +3087,268 @@
     const result = { active: [], closed: [] };
     if (!input) return result;
 
+    const invalidStrategyHints = new Set([
+      'trades',
+      'closed',
+      'active',
+      'open',
+      'results',
+      'result',
+      'data',
+      'payload',
+      'items',
+      'equity_curve',
+      'equitycurve',
+      'metrics',
+      'artifacts',
+      'reports',
+      'equity',
+      'history',
+      'failed',
+      'status',
+      'message',
+      'error',
+      'errors',
+      'config',
+      'modules',
+      'selection'
+    ]);
+
+    const pickStrategyFallback = (...candidates) => {
+      for (const candidate of candidates) {
+        const normalized = normalizeStrategyKey(candidate, false);
+        if (!normalized) continue;
+        if (invalidStrategyHints.has(normalized.toLowerCase())) continue;
+        return normalized;
+      }
+      return '';
+    };
+
+    const resolveStrategyKey = (trade, fallback) => {
+      const source = trade && typeof trade === 'object' ? trade : {};
+      const key = pickStrategyFallback(
+        source.module,
+        source.strategy,
+        source.strategy_key,
+        source.strategyKey,
+        source.primary,
+        source.primary_strategy,
+        source.primaryStrategy,
+        source.abbreviation,
+        source.identifier,
+        source.code,
+        source.key,
+        source.abcde,
+        fallback
+      );
+      return key || '—';
+    };
+
+    const mapActiveTrade = (trade, fallback) => {
+      const source = trade && typeof trade === 'object' ? trade : {};
+      const strategyKey = resolveStrategyKey(source, fallback);
+      const directionSource = source.direction || source.side || '';
+      const profitSource =
+        source.profit_pct ?? source.profit ?? source.current_profit ?? source.current_profit_pct;
+      return {
+        symbol: source.symbol,
+        module: strategyKey,
+        strategy: strategyKey,
+        direction: directionSource ? String(directionSource).toUpperCase() : '',
+        entry_price: source.entry_price,
+        profit: profitSource !== undefined && profitSource !== null ? Number(profitSource) : null,
+        trailing_stop: source.trailing_stop,
+        entry_time: source.entry_time || source.opened_at
+      };
+    };
+
+    const mapClosedTrade = (trade, fallback) => {
+      const source = trade && typeof trade === 'object' ? trade : {};
+      const strategyKey = resolveStrategyKey(source, fallback);
+      const directionSource = source.direction || source.side || '';
+      const profitSource =
+        source.profit_pct ?? source.profit ?? source.current_profit ?? source.current_profit_pct;
+      return {
+        symbol: source.symbol,
+        module: strategyKey,
+        strategy: strategyKey,
+        direction: directionSource ? String(directionSource).toUpperCase() : '',
+        entry_price: source.entry_price,
+        exit_price: source.exit_price,
+        profit: profitSource !== undefined && profitSource !== null ? Number(profitSource) : null,
+        entry_time: source.entry_time || source.opened_at,
+        exit_time: source.exit_time || source.closed_at
+      };
+    };
+
+    const closedSources = [];
+    const addClosedSource = (trades, fallback) => {
+      if (!Array.isArray(trades) || trades.length === 0) {
+        return false;
+      }
+      const fallbackKey = pickStrategyFallback(fallback);
+      closedSources.push({ trades, fallback: fallbackKey });
+      return true;
+    };
+
+    const processedEntries = new Set();
+    const collectResultEntry = (entry, fallbackHint) => {
+      if (!entry) return false;
+
+      if (Array.isArray(entry)) {
+        if (!entry.length) return false;
+        addClosedSource(entry, fallbackHint);
+        return true;
+      }
+
+      if (typeof entry !== 'object') {
+        return false;
+      }
+
+      if (processedEntries.has(entry)) {
+        return false;
+      }
+      processedEntries.add(entry);
+
+      const fallbackKey = pickStrategyFallback(
+        fallbackHint,
+        entry.strategy,
+        entry.module,
+        entry.strategy_key,
+        entry.strategyKey,
+        entry.primary,
+        entry.primary_strategy,
+        entry.primaryStrategy,
+        entry.abbreviation,
+        entry.identifier,
+        entry.code,
+        entry.key,
+        entry.abcde
+      );
+
+      let found = false;
+      const closedList = Array.isArray(entry.closed) ? entry.closed : [];
+      if (closedList.length) {
+        addClosedSource(closedList, fallbackKey);
+        found = true;
+      }
+
+      const tradesList = Array.isArray(entry.trades) ? entry.trades : [];
+      if ((!found || closedList.length === 0) && tradesList.length) {
+        addClosedSource(tradesList, fallbackKey);
+        found = true;
+      }
+
+      if (!found && entry.backtest) {
+        found = collectResultEntry(entry.backtest, fallbackKey || fallbackHint) || found;
+      }
+      if (!found && entry.result) {
+        found = collectResultEntry(entry.result, fallbackKey || fallbackHint) || found;
+      }
+      return found;
+    };
+
+    const collectResults = (source) => {
+      if (!source) return;
+
+      const preferred =
+        selectedStrategy && selectedStrategy !== STRATEGY_ALL
+          ? normalizeStrategyKey(selectedStrategy, false)
+          : '';
+
+      if (preferred) {
+        if (Array.isArray(source)) {
+          source.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const key = pickStrategyFallback(
+              entry.strategy,
+              entry.module,
+              entry.strategy_key,
+              entry.strategyKey,
+              entry.primary,
+              entry.primary_strategy,
+              entry.primaryStrategy,
+              entry.abbreviation,
+              entry.identifier,
+              entry.code,
+              entry.key
+            );
+            if (key && normalizeStrategyKey(key, false) === preferred) {
+              collectResultEntry(entry, key);
+            }
+          });
+        } else if (typeof source === 'object') {
+          if (
+            Object.prototype.hasOwnProperty.call(source, preferred) &&
+            collectResultEntry(source[preferred], preferred)
+          ) {
+            // continue collecting other entries afterwards
+          } else {
+            for (const [key, value] of Object.entries(source)) {
+              if (normalizeStrategyKey(key, false) === preferred) {
+                collectResultEntry(value, key);
+              }
+            }
+          }
+        }
+      }
+
+      if (Array.isArray(source)) {
+        source.forEach((entry) => {
+          if (!collectResultEntry(entry, undefined) && entry && typeof entry === 'object') {
+            Object.entries(entry).forEach(([key, value]) => {
+              collectResultEntry(value, key);
+            });
+          }
+        });
+        return;
+      }
+
+      if (typeof source === 'object') {
+        Object.entries(source).forEach(([key, value]) => {
+          collectResultEntry(value, key);
+        });
+      }
+    };
+
     const activeList = Array.isArray(input.active) ? input.active : [];
-    const closedList = Array.isArray(input.closed) ? input.closed : [];
+    result.active = activeList.map((trade) => mapActiveTrade(trade));
 
-    result.active = activeList.map((trade) => {
-      const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
-      return {
-        symbol: trade.symbol,
-        module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
-        direction: (trade.direction || trade.side || '').toUpperCase(),
-        entry_price: trade.entry_price,
-        profit: profit !== undefined && profit !== null ? Number(profit) : null,
-        trailing_stop: trade.trailing_stop,
-        entry_time: trade.entry_time || trade.opened_at
-      };
-    });
+    const topClosed = Array.isArray(input.closed) ? input.closed : [];
+    if (topClosed.length) {
+      addClosedSource(topClosed);
+    } else {
+      const backtestPayload =
+        input.backtest && typeof input.backtest === 'object' ? input.backtest : null;
+      if (backtestPayload) {
+        const fallbackHint = pickStrategyFallback(
+          backtestPayload.strategy,
+          backtestPayload.module,
+          backtestPayload.primary,
+          backtestPayload.primary_strategy,
+          backtestPayload.primaryStrategy
+        );
+        if (!addClosedSource(backtestPayload.closed, fallbackHint)) {
+          addClosedSource(backtestPayload.trades, fallbackHint);
+        }
+      }
 
-    result.closed = closedList.map((trade) => {
-      const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
-      return {
-        symbol: trade.symbol,
-        module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
-        direction: (trade.direction || trade.side || '').toUpperCase(),
-        entry_price: trade.entry_price,
-        exit_price: trade.exit_price,
-        profit: profit !== undefined && profit !== null ? Number(profit) : null,
-        entry_time: trade.entry_time || trade.opened_at,
-        exit_time: trade.exit_time || trade.closed_at
-      };
-    });
+      if (!closedSources.length) {
+        collectResults(input.results);
+      }
+
+      if (!closedSources.length) {
+        if (Array.isArray(input.trades)) {
+          addClosedSource(input.trades);
+        } else if (input.trades && typeof input.trades === 'object') {
+          collectResults(input.trades);
+        }
+      }
+    }
+
+    result.closed = closedSources.flatMap(({ trades, fallback }) =>
+      trades.map((trade) => mapClosedTrade(trade, fallback))
+    );
 
     return result;
   }

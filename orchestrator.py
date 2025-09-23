@@ -14,7 +14,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from itertools import zip_longest
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Tuple,
+    Type,
+    get_args,
+    get_origin,
+)
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
@@ -144,6 +156,31 @@ class Trade:
         return abs(self.trailing_stop - self.initial_stop) <= tolerance
 
 
+@dataclass
+class StrategyParameterDefinition:
+    """Describes a configurable constructor argument for a strategy."""
+
+    key: str
+    label: str
+    annotation: object
+    default: object
+    kind: inspect._ParameterKind
+    value_type: Optional[Type[object]]
+    input_type: str
+
+
+@dataclass
+class StrategyDefinition:
+    """Holds metadata required to instantiate a strategy module."""
+
+    abbreviation: str
+    name: str
+    description: str
+    cls: Type[ModuleBase]
+    parameters: Dict[str, StrategyParameterDefinition]
+    parameter_order: List[str]
+
+
 class Orchestrator:
     """Glue between market data, strategy modules and presentation layer."""
 
@@ -162,6 +199,22 @@ class Orchestrator:
         self.default_mode = self._normalize_mode(self.config.get("mode")) or "live"
         self.mode: Optional[str] = None
         self.backtest_config: Dict[str, object] = dict(self.config.get("backtest", {}))
+        raw_strategy_overrides = self.backtest_config.get("strategy_parameters")
+        strategy_overrides: Dict[str, Dict[str, object]] = {}
+        if isinstance(raw_strategy_overrides, Mapping):
+            for key, value in raw_strategy_overrides.items():
+                if not isinstance(value, Mapping):
+                    continue
+                abbreviation = str(key).upper()
+                fields: Dict[str, object] = {}
+                for field_key, field_value in value.items():
+                    fields[str(field_key)] = field_value
+                if fields:
+                    strategy_overrides[abbreviation] = fields
+        self.strategy_overrides: Dict[str, Dict[str, object]] = strategy_overrides
+        self.backtest_config["strategy_parameters"] = self.strategy_overrides
+        if isinstance(self.config.get("backtest"), MutableMapping):
+            self.config["backtest"]["strategy_parameters"] = self.strategy_overrides
         self.backtest_result: Optional[BacktestResult] = None
         self.trailing_percent = trailing_percent
         self.module_poll_interval = module_poll_interval
@@ -179,7 +232,9 @@ class Orchestrator:
         self._signal_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
+        self.strategy_definitions: Dict[str, StrategyDefinition] = {}
         self.strategies: Dict[str, ModuleBase] = self._discover_strategies()
+        self._sync_strategy_overrides()
         self.modules: List[ModuleBase] = [
             self.strategies[key] for key in sorted(self.strategies)
         ]
@@ -254,6 +309,59 @@ class Orchestrator:
             health = self.get_modules_health()
             return {"status": "ok", "health": health}
 
+        @self.socketio.on("request_strategy_config")
+        def _on_request_strategy_config(data=None):
+            modules = self._build_strategy_config_payload()
+            return {"status": "ok", "modules": modules}
+
+        @self.socketio.on("update_strategy_config")
+        def _on_update_strategy_config(data=None):
+            if not self.strategy_definitions:
+                return {"status": "error", "message": "Стратегии недоступны."}
+
+            payload = data or {}
+            overrides_payload = payload.get("overrides")
+            if overrides_payload is None:
+                return {
+                    "status": "error",
+                    "message": "Не переданы изменения параметров.",
+                }
+            try:
+                normalized = self._validate_strategy_overrides(overrides_payload)
+            except ValueError as exc:
+                return {"status": "error", "message": str(exc)}
+
+            if not normalized:
+                return {"status": "error", "message": "Изменения не обнаружены."}
+
+            changed = self._apply_strategy_overrides(normalized)
+            if not changed:
+                return {"status": "error", "message": "Изменения не обнаружены."}
+
+            modules = self._build_strategy_config_payload()
+
+            backtest_result: Optional[BacktestResult] = None
+            try:
+                backtest_result = self.run_backtest_with_overrides()
+            except Exception:
+                _logger.exception(
+                    "failed to run backtest after updating strategy parameters"
+                )
+                return {
+                    "status": "error",
+                    "message": "Параметры сохранены, но выполнить бэктест не удалось.",
+                    "modules": modules,
+                }
+
+            response: Dict[str, Any] = {
+                "status": "ok",
+                "message": "Параметры обновлены.",
+                "modules": modules,
+            }
+            if backtest_result:
+                response["backtest"] = backtest_result.to_dict()
+            return response
+
     # ------------------------------------------------------------------
     def _discover_strategies(self) -> Dict[str, ModuleBase]:
         """Load strategy implementations from the ``modules`` package."""
@@ -264,6 +372,7 @@ class Orchestrator:
             _logger.exception("failed to import strategy package")
             return {}
 
+        self.strategy_definitions.clear()
         discovered: Dict[str, ModuleBase] = {}
 
         for module_info in pkgutil.iter_modules(strategies_pkg.__path__, prefix=f"{strategies_pkg.__name__}."):
@@ -332,6 +441,15 @@ class Orchestrator:
                     continue
 
                 discovered[key] = instance
+                try:
+                    definition = self._build_strategy_definition(obj, instance)
+                except Exception:  # pragma: no cover - defensive
+                    _logger.exception(
+                        "failed to extract metadata for strategy %s",
+                        f"{module_name}.{obj.__name__}",
+                    )
+                else:
+                    self.strategy_definitions[key] = definition
 
         if not discovered:
             _logger.warning("no strategy modules were discovered")
@@ -346,6 +464,413 @@ class Orchestrator:
         return discovered
 
     # ------------------------------------------------------------------
+    def _build_strategy_definition(
+        self,
+        cls: Type[ModuleBase],
+        instance: ModuleBase,
+    ) -> StrategyDefinition:
+        signature = inspect.signature(cls.__init__)
+        parameters: Dict[str, StrategyParameterDefinition] = {}
+        order: List[str] = []
+
+        for name, parameter in signature.parameters.items():
+            if name in {"self", "client"}:
+                continue
+            if parameter.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+
+            annotation = parameter.annotation
+            default = parameter.default
+            value_type = self._resolve_parameter_annotation(annotation, default)
+            label = self._humanize_parameter_name(name)
+            input_type = self._infer_input_type(value_type)
+
+            parameters[name] = StrategyParameterDefinition(
+                key=name,
+                label=label,
+                annotation=annotation,
+                default=default,
+                kind=parameter.kind,
+                value_type=value_type,
+                input_type=input_type,
+            )
+            order.append(name)
+
+        description = inspect.getdoc(cls) or ""
+        if description:
+            description = description.strip().splitlines()[0]
+
+        return StrategyDefinition(
+            abbreviation=instance.abbreviation,
+            name=instance.name,
+            description=description,
+            cls=cls,
+            parameters=parameters,
+            parameter_order=order,
+        )
+
+    # ------------------------------------------------------------------
+    def _resolve_parameter_annotation(
+        self,
+        annotation: object,
+        default: object,
+    ) -> Optional[Type[object]]:
+        if annotation is inspect._empty or annotation is None:
+            if default is inspect._empty:
+                return None
+            return type(default)
+
+        if isinstance(annotation, str):
+            text = annotation.strip()
+            if not text:
+                if default is inspect._empty:
+                    return None
+                return type(default)
+            lowered = text.lower()
+            optional_prefixes = ("optional[", "typing.optional[")
+            for prefix in optional_prefixes:
+                if lowered.startswith(prefix) and lowered.endswith("]"):
+                    inner = text[text.find("[") + 1 : -1]
+                    return self._resolve_parameter_annotation(inner, default)
+            mapping = {
+                "int": int,
+                "float": float,
+                "str": str,
+                "string": str,
+                "bool": bool,
+                "boolean": bool,
+            }
+            resolved = mapping.get(lowered)
+            if resolved:
+                return resolved
+            # Handle union-style annotations like "float | None"
+            if "|" in text:
+                parts = [part.strip() for part in text.split("|") if part.strip()]
+                without_none = [part for part in parts if part.lower() != "none"]
+                if len(without_none) == 1:
+                    return self._resolve_parameter_annotation(without_none[0], default)
+            return type(default) if default is not inspect._empty else None
+
+        origin = get_origin(annotation)
+        if origin:
+            args = [arg for arg in get_args(annotation) if arg is not type(None)]
+            if len(args) == 1:
+                return self._resolve_parameter_annotation(args[0], default)
+        if isinstance(annotation, type):
+            return annotation
+
+        return None
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _infer_input_type(value_type: Optional[Type[object]]) -> str:
+        if value_type is bool:
+            return "checkbox"
+        if value_type in {int, float}:
+            return "number"
+        return "text"
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _humanize_parameter_name(name: str) -> str:
+        if not name:
+            return ""
+        tokens = name.replace("-", "_").split("_")
+        parts: List[str] = []
+        for token in tokens:
+            if not token:
+                continue
+            lowered = token.lower()
+            if len(lowered) <= 4:
+                parts.append(lowered.upper())
+            else:
+                parts.append(lowered.capitalize())
+        return " ".join(parts) if parts else name
+
+    # ------------------------------------------------------------------
+    def _sync_strategy_overrides(self) -> None:
+        if not self.strategy_definitions:
+            return
+
+        synchronized: Dict[str, Dict[str, object]] = {}
+        for key, overrides in self.strategy_overrides.items():
+            definition = self.strategy_definitions.get(key)
+            if not definition or not isinstance(overrides, Mapping):
+                continue
+
+            module_overrides: Dict[str, object] = {}
+            for field, raw_value in overrides.items():
+                meta = definition.parameters.get(str(field))
+                if not meta:
+                    continue
+                try:
+                    coerced = self._coerce_parameter_value(meta, raw_value)
+                except ValueError:
+                    continue
+                default_value = meta.default if meta.default is not inspect._empty else None
+                if coerced == default_value:
+                    continue
+                module_overrides[meta.key] = coerced
+
+            if module_overrides:
+                synchronized[key] = module_overrides
+
+        self.strategy_overrides = synchronized
+        self.backtest_config["strategy_parameters"] = synchronized
+        if isinstance(self.config.get("backtest"), MutableMapping):
+            self.config["backtest"]["strategy_parameters"] = synchronized
+
+    # ------------------------------------------------------------------
+    def _build_strategy_config_payload(self) -> List[Dict[str, object]]:
+        modules: List[Dict[str, object]] = []
+        for key in sorted(self.strategy_definitions):
+            definition = self.strategy_definitions[key]
+            overrides = self.strategy_overrides.get(key, {})
+            fields: List[Dict[str, object]] = []
+            for param_name in definition.parameter_order:
+                meta = definition.parameters.get(param_name)
+                if not meta:
+                    continue
+                default_value = meta.default if meta.default is not inspect._empty else None
+                value = overrides.get(param_name, default_value)
+                field_payload: Dict[str, object] = {
+                    "key": meta.key,
+                    "label": meta.label,
+                    "type": meta.input_type,
+                    "value": value,
+                }
+                if meta.default is not inspect._empty:
+                    field_payload["default"] = default_value
+                fields.append(field_payload)
+
+            module_payload: Dict[str, object] = {
+                "key": definition.abbreviation,
+                "identifier": definition.abbreviation,
+                "abbreviation": definition.abbreviation,
+                "name": definition.name,
+                "fields": fields,
+            }
+            if definition.description:
+                module_payload["description"] = definition.description
+            modules.append(module_payload)
+
+        return modules
+
+    # ------------------------------------------------------------------
+    def _coerce_parameter_value(
+        self,
+        meta: StrategyParameterDefinition,
+        value: object,
+    ) -> object:
+        if value is None:
+            return None
+
+        expected = meta.value_type
+        label = meta.label or meta.key
+
+        if expected is None:
+            return value
+
+        if expected is bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return bool(value)
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"1", "true", "yes", "y", "on"}:
+                    return True
+                if normalized in {"0", "false", "no", "n", "off"}:
+                    return False
+            raise ValueError(
+                f"Поле «{label}» должно быть булевым значением (да/нет)."
+            )
+
+        if expected is int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                if not value.is_integer():
+                    raise ValueError(
+                        f"Поле «{label}» должно быть целым числом."
+                    )
+                return int(value)
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    raise ValueError(
+                        f"Поле «{label}» должно быть целым числом."
+                    )
+                try:
+                    return int(text, 10)
+                except ValueError:
+                    try:
+                        parsed = float(text)
+                    except ValueError as exc:  # pragma: no cover - defensive
+                        raise ValueError(
+                            f"Поле «{label}» должно быть целым числом."
+                        ) from exc
+                    if not parsed.is_integer():
+                        raise ValueError(
+                            f"Поле «{label}» должно быть целым числом."
+                        )
+                    return int(parsed)
+            raise ValueError(
+                f"Поле «{label}» должно быть целым числом."
+            )
+
+        if expected is float:
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    raise ValueError(
+                        f"Поле «{label}» должно быть числом."
+                    )
+                try:
+                    return float(text)
+                except ValueError as exc:  # pragma: no cover - defensive
+                    raise ValueError(
+                        f"Поле «{label}» должно быть числом."
+                    ) from exc
+            raise ValueError(f"Поле «{label}» должно быть числом.")
+
+        if expected is str:
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    raise ValueError(
+                        f"Поле «{label}» должно быть строкой."
+                    )
+                return text
+            text = str(value)
+            if not text:
+                raise ValueError(f"Поле «{label}» должно быть строкой.")
+            return text
+
+        return value
+
+    # ------------------------------------------------------------------
+    def _validate_strategy_overrides(
+        self,
+        overrides: object,
+    ) -> Dict[str, Dict[str, object]]:
+        if not isinstance(overrides, Mapping):
+            raise ValueError("Некорректные данные конфигурации стратегий.")
+
+        sanitized: Dict[str, Dict[str, object]] = {}
+        for raw_key, raw_fields in overrides.items():
+            abbreviation = str(raw_key or "").upper().strip()
+            if not abbreviation:
+                continue
+            definition = self.strategy_definitions.get(abbreviation)
+            if not definition:
+                raise ValueError(f"Стратегия «{raw_key}» не найдена.")
+            if not isinstance(raw_fields, Mapping):
+                raise ValueError(
+                    f"Некорректные параметры для стратегии {definition.name}."
+                )
+
+            module_overrides: Dict[str, object] = {}
+            for raw_field, raw_value in raw_fields.items():
+                field_key = str(raw_field or "").strip()
+                if not field_key:
+                    continue
+                meta = definition.parameters.get(field_key)
+                if not meta:
+                    raise ValueError(
+                        f"Параметр «{field_key}» не поддерживается стратегией {definition.name}."
+                    )
+
+                if raw_value is None or (
+                    isinstance(raw_value, str) and not raw_value.strip()
+                ):
+                    default_value = (
+                        meta.default if meta.default is not inspect._empty else None
+                    )
+                    module_overrides[field_key] = default_value
+                    continue
+
+                coerced = self._coerce_parameter_value(meta, raw_value)
+                module_overrides[field_key] = coerced
+
+            if module_overrides:
+                sanitized[abbreviation] = module_overrides
+
+        return sanitized
+
+    # ------------------------------------------------------------------
+    def _apply_strategy_overrides(
+        self,
+        overrides: Dict[str, Dict[str, object]],
+    ) -> bool:
+        if not overrides:
+            return False
+
+        changed = False
+        for key, module_values in overrides.items():
+            definition = self.strategy_definitions.get(key)
+            if not definition:
+                continue
+
+            existing = dict(self.strategy_overrides.get(key, {}))
+            for field, value in module_values.items():
+                meta = definition.parameters.get(field)
+                if not meta:
+                    continue
+                default_value = meta.default if meta.default is not inspect._empty else None
+                if value == default_value:
+                    if field in existing:
+                        existing.pop(field)
+                        changed = True
+                    continue
+                if existing.get(field) != value:
+                    existing[field] = value
+                    changed = True
+
+            if existing:
+                self.strategy_overrides[key] = existing
+            else:
+                if key in self.strategy_overrides:
+                    changed = True
+                    self.strategy_overrides.pop(key, None)
+
+        if changed:
+            sanitized = {k: dict(v) for k, v in self.strategy_overrides.items() if v}
+            self.strategy_overrides = sanitized
+            self.backtest_config["strategy_parameters"] = sanitized
+            if isinstance(self.config.get("backtest"), MutableMapping):
+                self.config["backtest"]["strategy_parameters"] = sanitized
+
+        return changed
+
+    # ------------------------------------------------------------------
+    def _instantiate_strategy(
+        self,
+        definition: StrategyDefinition,
+        overrides: Optional[Mapping[str, object]] = None,
+    ) -> ModuleBase:
+        kwargs: Dict[str, object] = {}
+        if overrides:
+            for key, value in overrides.items():
+                if value is inspect._empty:
+                    continue
+                kwargs[str(key)] = value
+        return definition.cls(self.client, **kwargs)
+
+    # ------------------------------------------------------------------
+    def run_backtest_with_overrides(self) -> Optional[BacktestResult]:
+        result = self._run_backtest()
+        if result:
+            self._broadcast_state()
+        return result
+
     def start(self, mode: Optional[str] = None) -> None:
         target_mode = self._normalize_mode(mode) or self.default_mode
         if target_mode not in {"live", "backtest"}:
@@ -444,26 +969,51 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _run_backtest(self) -> Optional[BacktestResult]:
         self.backtest_result = None
-        if not self.strategies:
+        if not self.strategy_definitions:
             _logger.warning("no strategy modules available for backtest")
             return None
 
         cfg = self.backtest_config
         strategy_key = str(cfg.get("strategy") or "").upper()
-        strategy = self.strategies.get(strategy_key)
-        if not strategy:
-            strategy = next(iter(self.strategies.values()))
+        definition = self.strategy_definitions.get(strategy_key)
+        if not definition:
+            available = sorted(self.strategy_definitions)
+            if not available:
+                _logger.warning("no strategy modules available for backtest")
+                return None
+            fallback_key = available[0]
+            definition = self.strategy_definitions[fallback_key]
             if strategy_key:
                 _logger.warning(
                     "strategy %s not found; defaulting to %s",
                     strategy_key,
-                    strategy.abbreviation,
+                    definition.abbreviation,
                 )
-            strategy_key = strategy.abbreviation
+            strategy_key = definition.abbreviation
+            cfg["strategy"] = strategy_key
+            if isinstance(self.config.get("backtest"), MutableMapping):
+                self.config["backtest"]["strategy"] = strategy_key
+
+        overrides = self.strategy_overrides.get(strategy_key, {})
+        try:
+            strategy = self._instantiate_strategy(definition, overrides)
+        except Exception:
+            _logger.exception(
+                "failed to instantiate strategy %s for backtest",
+                definition.abbreviation,
+            )
+            return None
 
         symbol = str(cfg.get("symbol", "BTCUSDT")).upper()
         interval = str(cfg.get("interval") or getattr(strategy, "interval", "1h"))
-        limit = int(cfg.get("limit") or max(strategy.lookback, strategy.minimum_bars))
+        limit_value = cfg.get("limit")
+        if limit_value is None:
+            limit = int(max(strategy.lookback, strategy.minimum_bars))
+        else:
+            try:
+                limit = int(limit_value)
+            except (TypeError, ValueError):
+                limit = int(max(strategy.lookback, strategy.minimum_bars))
 
         candles: List[Kline] = []
         csv_path = cfg.get("csv_path")

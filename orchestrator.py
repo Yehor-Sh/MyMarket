@@ -311,7 +311,9 @@ class Orchestrator:
     def start(self) -> None:
         if self.mode == "backtest":
             _logger.info("Starting orchestrator in backtest mode")
-            self.backtest_result = self._run_backtest()
+            result = self._run_backtest()
+            self.backtest_result = result
+            self._broadcast_state()
             return
 
         self.client.start()
@@ -579,9 +581,25 @@ class Orchestrator:
         return len(closed_payloads)
 
     # ------------------------------------------------------------------
-    from datetime import datetime, UTC
-
     def _serialize_state(self) -> Dict[str, object]:
+        server_time = datetime.now(UTC).isoformat()
+
+        if self.mode == "backtest" and self.backtest_result:
+            strategy_key = self.backtest_result.strategy
+            closed_trades: List[Dict[str, object]] = []
+            for trade in self.backtest_result.trades:
+                payload = dict(trade)
+                if not payload.get("strategy"):
+                    payload["strategy"] = strategy_key
+                if not payload.get("module"):
+                    payload["module"] = strategy_key
+                closed_trades.append(payload)
+            return {
+                "active": [],
+                "closed": closed_trades,
+                "server_time": server_time,
+            }
+
         with self._lock:
             active = [trade.to_dict() for trade in self.active_trades.values()]
             closed = [trade.to_dict() for trade in self.closed_trades]
@@ -590,7 +608,7 @@ class Orchestrator:
         return {
             "active": active,
             "closed": closed,
-            "server_time": datetime.now(UTC).isoformat(),
+            "server_time": server_time,
         }
 
     # ------------------------------------------------------------------

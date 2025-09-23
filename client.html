@@ -1159,6 +1159,7 @@
   };
 
   let strategyConfigData = [];
+  let strategyConfigDataSignature = JSON.stringify(strategyConfigData);
   let strategyConfigLoading = false;
   let strategyConfigError = null;
   let strategyConfigSubmitting = false;
@@ -1633,13 +1634,31 @@
     }
   }
 
+  function updateStrategyConfigData(data, options = {}) {
+    const opts = options || {};
+    const silent = Boolean(opts.silent);
+    const normalized = normalizeStrategyConfigModules(data);
+    const serialized = JSON.stringify(normalized);
+    const changed = serialized !== strategyConfigDataSignature;
+    if (changed) {
+      strategyConfigData = normalized;
+      strategyConfigDataSignature = serialized;
+    }
+    if (!silent || changed) {
+      strategyConfigError = null;
+      strategyConfigSubmitError = '';
+      strategyConfigLastFetch = Date.now();
+    }
+    if (!silent) {
+      renderStrategyConfig();
+      updateUI();
+    }
+    return changed;
+  }
+
   function applyStrategyConfigPayload(payload) {
     const { data } = extractStrategyConfigSource(payload);
-    strategyConfigData = normalizeStrategyConfigModules(data);
-    strategyConfigError = null;
-    strategyConfigLastFetch = Date.now();
-    strategyConfigSubmitError = '';
-    renderStrategyConfig();
+    updateStrategyConfigData(data);
   }
 
   function requestStrategyConfig(force = false) {
@@ -2167,7 +2186,22 @@
     } else if (!payload) {
       applyServerMode(null);
     }
+    let strategyMetadataChanged = false;
+    if (payload && typeof payload === 'object') {
+      if (Object.prototype.hasOwnProperty.call(payload, 'strategy_config')) {
+        strategyMetadataChanged =
+          updateStrategyConfigData(payload.strategy_config, { silent: true }) ||
+          strategyMetadataChanged;
+      } else if (Object.prototype.hasOwnProperty.call(payload, 'strategyConfig')) {
+        strategyMetadataChanged =
+          updateStrategyConfigData(payload.strategyConfig, { silent: true }) ||
+          strategyMetadataChanged;
+      }
+    }
     tradesData = normalizeTradesData(payload);
+    if (strategyMetadataChanged) {
+      renderStrategyConfig();
+    }
     updateUI();
   }
 
@@ -2242,50 +2276,138 @@
     return false;
   }
 
+  function normalizeStrategyKey(value, fallbackToPlaceholder = true) {
+    if (value === undefined || value === null) {
+      return fallbackToPlaceholder ? '—' : '';
+    }
+    const text = String(value).trim();
+    if (!text) {
+      return fallbackToPlaceholder ? '—' : '';
+    }
+    return text;
+  }
+
   function getFilteredTrades() {
     if (selectedStrategy === STRATEGY_ALL) return tradesData;
     const filter = selectedStrategy;
     return {
-      active: tradesData.active.filter((trade) => (trade.module || '—') === filter),
-      closed: tradesData.closed.filter((trade) => (trade.module || '—') === filter)
+      active: tradesData.active.filter((trade) => normalizeStrategyKey(trade.module) === filter),
+      closed: tradesData.closed.filter((trade) => normalizeStrategyKey(trade.module) === filter)
     };
   }
 
   function getStrategySummary() {
     const summary = new Map();
-    const ensure = (name) => {
-      const key = name || '—';
-      if (!summary.has(key)) {
-        summary.set(key, { name: key, active: 0, closed: 0 });
+    const configLookup = new Map();
+    const configCount = strategyConfigData.length;
+    let extraOrder = 0;
+    const maxOrderValue = Number.MAX_SAFE_INTEGER || Math.pow(2, 53) - 1;
+
+    const register = (value, label, orderHint) => {
+      if (!value) return null;
+      const displayLabel = label && String(label).trim() ? String(label).trim() : value;
+      let entry = summary.get(value);
+      if (!entry) {
+        entry = {
+          value,
+          label: displayLabel,
+          active: 0,
+          closed: 0,
+          order: Number.isFinite(orderHint) ? orderHint : maxOrderValue
+        };
+        summary.set(value, entry);
+      } else {
+        if (displayLabel && (!entry.label || entry.label === entry.value)) {
+          entry.label = displayLabel;
+        }
+        if (Number.isFinite(orderHint) && orderHint < entry.order) {
+          entry.order = orderHint;
+        }
       }
-      return summary.get(key);
+      return entry;
     };
 
-    tradesData.active.forEach((trade) => {
-      ensure(trade.module).active += 1;
+    strategyConfigData.forEach((module, index) => {
+      if (!module || typeof module !== 'object') return;
+      const valueCandidates = [
+        module.abbreviation,
+        module.identifier,
+        module.key,
+        module.module,
+        module.name
+      ];
+      let value = '';
+      for (const candidate of valueCandidates) {
+        value = normalizeStrategyKey(candidate, false);
+        if (value) break;
+      }
+      if (!value) return;
+
+      const labelCandidates = [
+        module.name,
+        module.title,
+        module.label,
+        module.displayName,
+        module.abbreviation
+      ];
+      let label = '';
+      for (const candidate of labelCandidates) {
+        if (candidate === undefined || candidate === null) continue;
+        const text = String(candidate).trim();
+        if (text) {
+          label = text;
+          break;
+        }
+      }
+      if (!label) label = value;
+
+      configLookup.set(value, { label, order: index });
+      register(value, label, index);
     });
 
-    tradesData.closed.forEach((trade) => {
-      ensure(trade.module).closed += 1;
+    const registerTradeCounts = (trade, bucket) => {
+      if (!trade) return;
+      const value = normalizeStrategyKey(trade.module || trade.strategy || trade.abcde);
+      const lookup = configLookup.get(value);
+      let orderHint = lookup ? lookup.order : undefined;
+      if (!lookup && !summary.has(value)) {
+        orderHint = configCount + extraOrder;
+        extraOrder += 1;
+      }
+      const label = lookup ? lookup.label : value;
+      const entry = register(value, label, orderHint);
+      if (entry) {
+        entry[bucket] += 1;
+      }
+    };
+
+    tradesData.active.forEach((trade) => registerTradeCounts(trade, 'active'));
+    tradesData.closed.forEach((trade) => registerTradeCounts(trade, 'closed'));
+
+    const sorted = Array.from(summary.values()).sort((a, b) => {
+      if (a.order !== b.order) {
+        return a.order - b.order;
+      }
+      return a.label.localeCompare(b.label, 'ru', { sensitivity: 'base' });
     });
 
-    return Array.from(summary.values())
-      .sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' }));
+    return sorted.map(({ value, label, active, closed }) => ({ value, label, active, closed }));
   }
 
-  function ensureStrategySelection() {
+  function ensureStrategySelection(strategies) {
     if (selectedStrategy === STRATEGY_ALL) return;
-    const available = getStrategySummary().some((item) => item.name === selectedStrategy);
+    const options = Array.isArray(strategies) ? strategies : getStrategySummary();
+    const available = options.some((item) => item.value === selectedStrategy);
     if (!available) {
       selectedStrategy = STRATEGY_ALL;
     }
   }
 
-  function renderStrategyOptions() {
+  function renderStrategyOptions(strategies) {
     const listEl = document.getElementById('strategyList');
     if (!listEl) return;
 
-    const strategies = getStrategySummary();
+    const options = Array.isArray(strategies) ? strategies : getStrategySummary();
     const totalActive = tradesData.active.length;
     const totalClosed = tradesData.closed.length;
 
@@ -2294,10 +2416,10 @@
       <span class="strategy-item__counts">${totalActive} активных · ${totalClosed} закрытых</span>
     </button>`;
 
-    strategies.forEach((item) => {
-      const selected = selectedStrategy === item.name ? 'is-selected' : '';
-      html += `<button type="button" class="strategy-item ${selected}" data-strategy="${escapeHtml(item.name)}">
-        <span class="strategy-item__name">${escapeHtml(item.name)}</span>
+    options.forEach((item) => {
+      const selected = selectedStrategy === item.value ? 'is-selected' : '';
+      html += `<button type="button" class="strategy-item ${selected}" data-strategy="${escapeHtml(item.value)}">
+        <span class="strategy-item__name">${safeText(item.label)}</span>
         <span class="strategy-item__counts">${item.active} активных · ${item.closed} закрытых</span>
       </button>`;
     });
@@ -2305,12 +2427,21 @@
     listEl.innerHTML = html;
   }
 
-  function updateSelectedStrategyLabel() {
+  function updateSelectedStrategyLabel(strategies) {
     const el = document.getElementById('selectedStrategyName');
     if (!el) return;
-    const label = selectedStrategy === STRATEGY_ALL ? 'все стратегии' : selectedStrategy;
-    el.textContent = label;
-    el.setAttribute('title', label);
+    if (selectedStrategy === STRATEGY_ALL) {
+      el.textContent = 'все стратегии';
+      el.setAttribute('title', 'все стратегии');
+      return;
+    }
+
+    const options = Array.isArray(strategies) ? strategies : getStrategySummary();
+    const match = options.find((item) => item.value === selectedStrategy);
+    const label = match ? match.label : selectedStrategy;
+    const display = label && String(label).trim() ? String(label).trim() : '—';
+    el.textContent = display;
+    el.setAttribute('title', display);
   }
 
   function ensureNoDataMessage(table, columns, message) {
@@ -2496,9 +2627,10 @@
   }
 
   function updateUI() {
-    ensureStrategySelection();
-    renderStrategyOptions();
-    updateSelectedStrategyLabel();
+    const strategies = getStrategySummary();
+    ensureStrategySelection(strategies);
+    renderStrategyOptions(strategies);
+    updateSelectedStrategyLabel(strategies);
     const filtered = getFilteredTrades();
     updateActiveTrades(filtered.active);
     updateClosedTrades(filtered.closed);

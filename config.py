@@ -18,6 +18,7 @@ CONFIG: Dict[str, Any] = {
         "initial_capital": 10_000.0,
         "commission_pct": 0.0,
         "report_directory": str(Path("backtest_reports")),
+        "strategy_parameters": {},
     },
 }
 

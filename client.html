@@ -542,6 +542,28 @@
       gap: 12px;
     }
 
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px 14px;
+    }
+
+    .config-field--wide {
+      grid-column: span 2;
+    }
+
+    @media (max-width: 520px) {
+      .config-field--wide {
+        grid-column: span 1;
+      }
+    }
+
+    .config-checkbox-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
     .config-status {
       font-size: 0.74rem;
       letter-spacing: 0.06em;
@@ -1123,6 +1145,149 @@
         </div>
       </form>
     </section>
+    <section class="panel-section config-section" id="backtestConfigSection" aria-live="polite">
+      <div class="panel-subtitle">Backtest Settings</div>
+      <form class="config-form" id="backtestConfigForm" novalidate>
+        <div class="config-status is-muted" id="backtestConfigStatus" role="status" aria-live="polite"></div>
+        <div class="config-grid" id="backtestConfigFields">
+          <div class="config-field">
+            <label class="config-field__label" for="backtestSymbol">Тикер</label>
+            <input
+              type="text"
+              id="backtestSymbol"
+              class="config-input"
+              data-backtest-field="symbol"
+              data-backtest-transform="upper"
+              data-backtest-label="Тикер"
+              autocomplete="off"
+            >
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestInterval">Интервал</label>
+            <input
+              type="text"
+              id="backtestInterval"
+              class="config-input"
+              data-backtest-field="interval"
+              data-backtest-label="Интервал"
+              autocomplete="off"
+            >
+          </div>
+          <div class="config-field config-field--wide">
+            <label class="config-field__label" for="backtestCsvPath">CSV путь</label>
+            <input
+              type="text"
+              id="backtestCsvPath"
+              class="config-input"
+              data-backtest-field="csv_path"
+              data-backtest-label="CSV путь"
+              autocomplete="off"
+              spellcheck="false"
+            >
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestLimit">Количество свечей</label>
+            <input
+              type="number"
+              id="backtestLimit"
+              class="config-input"
+              data-backtest-field="limit"
+              data-backtest-type="number"
+              data-backtest-label="Количество свечей"
+              min="0"
+              step="1"
+              inputmode="numeric"
+            >
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestTrailing">Trailing %</label>
+            <input
+              type="number"
+              id="backtestTrailing"
+              class="config-input"
+              data-backtest-field="trailing_percent"
+              data-backtest-type="number"
+              data-backtest-label="Trailing %"
+              step="0.01"
+              inputmode="decimal"
+            >
+          </div>
+          <div class="config-field config-field--checkbox">
+            <label class="config-checkbox" for="backtestEnableTrailing">
+              <input
+                type="checkbox"
+                id="backtestEnableTrailing"
+                class="config-input config-input--checkbox"
+                data-backtest-field="enable_trailing"
+                data-backtest-label="Включить трейлинг-стоп"
+              >
+              <span>Включить трейлинг-стоп</span>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestInitialCapital">Начальный капитал</label>
+            <input
+              type="number"
+              id="backtestInitialCapital"
+              class="config-input"
+              data-backtest-field="initial_capital"
+              data-backtest-type="number"
+              data-backtest-label="Начальный капитал"
+              step="0.01"
+              inputmode="decimal"
+            >
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestCommission">Комиссия %</label>
+            <input
+              type="number"
+              id="backtestCommission"
+              class="config-input"
+              data-backtest-field="commission_pct"
+              data-backtest-type="number"
+              data-backtest-label="Комиссия %"
+              step="0.01"
+              inputmode="decimal"
+            >
+          </div>
+          <div class="config-field config-field--wide">
+            <label class="config-field__label" for="backtestReportDir">Каталог отчёта</label>
+            <input
+              type="text"
+              id="backtestReportDir"
+              class="config-input"
+              data-backtest-field="report_directory"
+              data-backtest-label="Каталог отчёта"
+              autocomplete="off"
+              spellcheck="false"
+            >
+          </div>
+          <div class="config-field">
+            <label class="config-field__label" for="backtestStrategy">Базовая стратегия</label>
+            <select
+              id="backtestStrategy"
+              class="config-input config-input--select"
+              data-backtest-field="strategy"
+              data-backtest-label="Базовая стратегия"
+              data-backtest-transform="upper"
+            ></select>
+            <div class="config-field__hint">Используется по умолчанию при запуске.</div>
+          </div>
+        </div>
+        <fieldset class="config-module" id="backtestModulesFieldset">
+          <legend class="config-module__title">Стратегии для бэктеста</legend>
+          <div class="config-module__description">
+            Выберите модули, которые необходимо задействовать при запуске бэктеста.
+          </div>
+          <div class="config-checkbox-group" id="backtestModules"></div>
+        </fieldset>
+        <div class="config-actions">
+          <button class="panel-action panel-action--muted" type="button" id="backtestConfigRefresh">Обновить</button>
+          <button class="panel-action panel-action--primary" type="submit" id="backtestConfigSubmit">Сохранить настройки</button>
+          <button class="panel-action panel-action--primary" type="button" id="backtestRunButton">Run Backtest</button>
+        </div>
+      </form>
+    </section>
     <section class="panel-section">
       <div class="panel-subtitle">Состояние модулей</div>
       <div class="health-list" id="moduleHealth" aria-live="polite">
@@ -1166,6 +1331,26 @@
   let strategyConfigSubmitStatus = '';
   let strategyConfigSubmitError = '';
   let strategyConfigLastFetch = 0;
+
+  let backtestConfig = createDefaultBacktestConfig();
+  let backtestConfigSignature = JSON.stringify(backtestConfig);
+  let backtestConfigAppliedSignature = '';
+  let backtestConfigLoading = false;
+  let backtestConfigError = null;
+  let backtestConfigSubmitting = false;
+  let backtestConfigSubmitStatus = '';
+  let backtestConfigSubmitError = '';
+  let backtestRunPending = false;
+  let backtestRunStatus = '';
+  let backtestRunError = '';
+  let backtestConfigLastFetch = 0;
+  let backtestAvailableModules = [];
+  let backtestAvailableModulesSignature = JSON.stringify(backtestAvailableModules);
+  let backtestModulesAppliedSignature = '';
+  let backtestStrategyOptionsSignature = '';
+  let backtestSelectedModules = [];
+  let backtestSelectedModulesSignature = JSON.stringify(backtestSelectedModules);
+  let backtestSelectedModulesAppliedSignature = '';
 
   function createDomKey(source, fallback) {
     const value = source !== undefined && source !== null ? String(source) : '';
@@ -1291,6 +1476,872 @@
     }
 
     return result;
+  }
+
+  function createDefaultBacktestConfig() {
+    return {
+      symbol: '',
+      interval: '',
+      strategy: '',
+      csv_path: '',
+      limit: null,
+      trailing_percent: null,
+      enable_trailing: null,
+      initial_capital: null,
+      commission_pct: null,
+      report_directory: '',
+      strategy_parameters: {},
+      selected_modules: []
+    };
+  }
+
+  function normalizeBacktestConfigValues(raw) {
+    const defaults = createDefaultBacktestConfig();
+    if (!raw || typeof raw !== 'object') {
+      return defaults;
+    }
+
+    const result = { ...defaults };
+
+    if (raw.symbol !== undefined && raw.symbol !== null) {
+      const text = String(raw.symbol).trim();
+      if (text) {
+        result.symbol = text.toUpperCase();
+      }
+    }
+
+    if (raw.interval !== undefined && raw.interval !== null) {
+      const text = String(raw.interval).trim();
+      if (text) {
+        result.interval = text;
+      }
+    }
+
+    const csvSource = raw.csv_path !== undefined ? raw.csv_path : raw.csvPath;
+    if (csvSource !== undefined && csvSource !== null) {
+      const text = String(csvSource).trim();
+      result.csv_path = text;
+    }
+
+    const limitValue = parseNumeric(raw.limit);
+    if (limitValue !== null) {
+      result.limit = limitValue;
+    }
+
+    const trailingValue = parseNumeric(raw.trailing_percent !== undefined ? raw.trailing_percent : raw.trailingPercent);
+    if (trailingValue !== null) {
+      result.trailing_percent = trailingValue;
+    }
+
+    if (raw.enable_trailing !== undefined && raw.enable_trailing !== null) {
+      result.enable_trailing = Boolean(raw.enable_trailing);
+    } else if (raw.enableTrailing !== undefined && raw.enableTrailing !== null) {
+      result.enable_trailing = Boolean(raw.enableTrailing);
+    }
+
+    const initialCapitalValue = parseNumeric(
+      raw.initial_capital !== undefined ? raw.initial_capital : raw.initialCapital
+    );
+    if (initialCapitalValue !== null) {
+      result.initial_capital = initialCapitalValue;
+    }
+
+    const commissionValue = parseNumeric(
+      raw.commission_pct !== undefined ? raw.commission_pct : raw.commissionPct
+    );
+    if (commissionValue !== null) {
+      result.commission_pct = commissionValue;
+    }
+
+    const reportDirSource =
+      raw.report_directory !== undefined ? raw.report_directory : raw.reportDirectory;
+    if (reportDirSource !== undefined && reportDirSource !== null) {
+      const text = String(reportDirSource).trim();
+      result.report_directory = text;
+    }
+
+    const strategySource =
+      raw.strategy !== undefined && raw.strategy !== null
+        ? raw.strategy
+        : raw.module !== undefined && raw.module !== null
+        ? raw.module
+        : raw.abbreviation !== undefined && raw.abbreviation !== null
+        ? raw.abbreviation
+        : raw.primary_strategy !== undefined && raw.primary_strategy !== null
+        ? raw.primary_strategy
+        : raw.primaryStrategy;
+    if (strategySource !== undefined && strategySource !== null) {
+      const text = String(strategySource).trim();
+      if (text) {
+        result.strategy = text.toUpperCase();
+      }
+    }
+
+    const strategyParams =
+      raw.strategy_parameters && typeof raw.strategy_parameters === 'object'
+        ? raw.strategy_parameters
+        : raw.strategyParameters && typeof raw.strategyParameters === 'object'
+        ? raw.strategyParameters
+        : null;
+    if (strategyParams) {
+      result.strategy_parameters = { ...strategyParams };
+    }
+
+    const selectionSource = Array.isArray(raw.selected_modules)
+      ? raw.selected_modules
+      : Array.isArray(raw.modules)
+      ? raw.modules
+      : Array.isArray(raw.strategies)
+      ? raw.strategies
+      : Array.isArray(raw.selection)
+      ? raw.selection
+      : Array.isArray(raw.selected)
+      ? raw.selected
+      : null;
+    if (selectionSource) {
+      const normalized = [];
+      const seen = new Set();
+      selectionSource.forEach((value) => {
+        const normalizedValue = normalizeStrategyKey(value, false);
+        if (!normalizedValue) return;
+        const code = normalizedValue.toUpperCase();
+        if (seen.has(code)) return;
+        seen.add(code);
+        normalized.push(code);
+      });
+      result.selected_modules = normalized;
+    }
+
+    return result;
+  }
+
+  function normalizeBacktestModuleOptions(source) {
+    if (!source) return [];
+
+    const options = [];
+    const seen = new Set();
+
+    const register = (value, label) => {
+      const normalized = normalizeStrategyKey(value, false);
+      if (!normalized) return;
+      const code = normalized.toUpperCase();
+      if (seen.has(code)) return;
+      const display = label && String(label).trim() ? String(label).trim() : code;
+      seen.add(code);
+      options.push({ value: code, label: display });
+    };
+
+    if (Array.isArray(source)) {
+      source.forEach((item) => {
+        if (item === undefined || item === null) return;
+        if (typeof item === 'string' || typeof item === 'number') {
+          register(item, item);
+          return;
+        }
+        if (typeof item === 'object') {
+          const value =
+            item.value ??
+            item.abbreviation ??
+            item.code ??
+            item.key ??
+            item.identifier ??
+            item.strategy ??
+            item.module ??
+            item.name;
+          const label =
+            item.label ?? item.title ?? item.name ?? item.description ?? item.displayName ?? value;
+          register(value, label);
+        }
+      });
+      return options;
+    }
+
+    if (typeof source === 'object') {
+      Object.entries(source).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const optionValue =
+            value.value ??
+            value.abbreviation ??
+            value.code ??
+            value.key ??
+            value.identifier ??
+            key;
+          const optionLabel =
+            value.label ?? value.title ?? value.name ?? value.description ?? optionValue;
+          register(optionValue, optionLabel);
+        } else {
+          register(key, value);
+        }
+      });
+    }
+
+    return options;
+  }
+
+  function extractBacktestConfigSource(payload) {
+    if (payload === undefined || payload === null) {
+      return { config: null, modules: null, message: null };
+    }
+    if (typeof payload !== 'object') {
+      return { config: payload, modules: null, message: null };
+    }
+
+    const message = payload.message || null;
+
+    const configKeys = [
+      'config',
+      'backtest',
+      'backtest_config',
+      'backtestConfig',
+      'settings',
+      'data',
+      'values'
+    ];
+    let configData = null;
+    for (const key of configKeys) {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        configData = payload[key];
+        break;
+      }
+    }
+    if (!configData && payload.backtest && typeof payload.backtest === 'object') {
+      const nested = payload.backtest;
+      for (const key of configKeys) {
+        if (Object.prototype.hasOwnProperty.call(nested, key)) {
+          configData = nested[key];
+          break;
+        }
+      }
+      if (!configData) {
+        configData = nested;
+      }
+    }
+    if (!configData && !('status' in payload) && !('health' in payload)) {
+      configData = payload;
+    }
+
+    const modulesKeys = [
+      'available_modules',
+      'modules',
+      'available_strategies',
+      'availableStrategies',
+      'strategies',
+      'items',
+      'options'
+    ];
+    let modulesSource = null;
+    for (const key of modulesKeys) {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        modulesSource = payload[key];
+        break;
+      }
+    }
+    if (!modulesSource && configData && typeof configData === 'object') {
+      for (const key of modulesKeys) {
+        if (Object.prototype.hasOwnProperty.call(configData, key)) {
+          modulesSource = configData[key];
+          break;
+        }
+      }
+    }
+
+    return { config: configData, modules: modulesSource, message };
+  }
+
+  function updateBacktestAvailableModules(modules, options = {}) {
+    const normalized = normalizeBacktestModuleOptions(modules);
+    const serialized = JSON.stringify(normalized);
+    const changed = serialized !== backtestAvailableModulesSignature;
+    if (changed) {
+      backtestAvailableModules = normalized;
+      backtestAvailableModulesSignature = serialized;
+    }
+    if (!options.silent) {
+      renderBacktestConfig({ updateModules: true, updateSelection: true });
+    }
+    return changed;
+  }
+
+  function getBacktestModuleOptions() {
+    const options = [];
+    const seen = new Set();
+
+    const register = (value, label) => {
+      const normalized = normalizeStrategyKey(value, false);
+      if (!normalized) return;
+      const code = normalized.toUpperCase();
+      if (seen.has(code)) return;
+      const display = label && String(label).trim() ? String(label).trim() : code;
+      seen.add(code);
+      options.push({ value: code, label: display });
+    };
+
+    backtestAvailableModules.forEach((item) => {
+      register(item.value ?? item.abbreviation ?? item.key ?? item.code, item.label ?? item.name);
+    });
+
+    strategyConfigData.forEach((module) => {
+      register(
+        module.abbreviation || module.identifier || module.key || module.name,
+        module.name || module.title || module.label || module.abbreviation
+      );
+    });
+
+    if (backtestConfig) {
+      if (backtestConfig.strategy) {
+        register(backtestConfig.strategy, backtestConfig.strategy);
+      }
+      if (Array.isArray(backtestConfig.selected_modules)) {
+        backtestConfig.selected_modules.forEach((value) => register(value, value));
+      }
+    }
+
+    return options;
+  }
+
+  function setBacktestSelectedModules(modules, options = {}) {
+    const list = Array.isArray(modules) ? modules : [];
+    const normalized = [];
+    const seen = new Set();
+
+    list.forEach((value) => {
+      const normalizedValue = normalizeStrategyKey(value, false);
+      if (!normalizedValue) return;
+      const code = normalizedValue.toUpperCase();
+      if (seen.has(code)) return;
+      seen.add(code);
+      normalized.push(code);
+    });
+
+    const serialized = JSON.stringify(normalized);
+    const changed = serialized !== backtestSelectedModulesSignature;
+    if (changed) {
+      backtestSelectedModules = normalized;
+      backtestSelectedModulesSignature = serialized;
+      if (backtestConfig && typeof backtestConfig === 'object') {
+        backtestConfig.selected_modules = normalized.slice();
+      }
+    }
+    if (!options.silent) {
+      renderBacktestConfig({ updateSelection: true });
+    }
+    return changed;
+  }
+
+  function syncBacktestSelectionFromConfig(config, options = {}) {
+    if (!config) return;
+    const seeds = [];
+    const strategy = normalizeStrategyKey(config.strategy, false);
+    if (strategy) {
+      seeds.push(strategy.toUpperCase());
+    }
+    if (Array.isArray(config.selected_modules)) {
+      config.selected_modules.forEach((value) => {
+        const normalized = normalizeStrategyKey(value, false);
+        if (!normalized) return;
+        seeds.push(normalized.toUpperCase());
+      });
+    }
+    if (!seeds.length) return;
+    const merged = Array.from(new Set([...seeds, ...backtestSelectedModules]));
+    setBacktestSelectedModules(merged, { silent: options.silent });
+  }
+
+  function updateBacktestConfigData(data, options = {}) {
+    const normalized = normalizeBacktestConfigValues(data);
+    const serialized = JSON.stringify(normalized);
+    const changed = serialized !== backtestConfigSignature;
+    if (changed) {
+      backtestConfig = normalized;
+      backtestConfigSignature = serialized;
+      syncBacktestSelectionFromConfig(normalized, { silent: true });
+    }
+    if (!options.silent || changed) {
+      backtestConfigError = null;
+      backtestConfigSubmitError = '';
+      backtestRunError = '';
+      backtestConfigLastFetch = Date.now();
+    }
+    if (!options.silent && (changed || options.forceRender)) {
+      renderBacktestConfig({ updateValues: true, updateModules: true, updateSelection: true });
+    }
+    return changed;
+  }
+
+  function applyBacktestConfigPayload(payload, options = {}) {
+    if (!payload) return false;
+    const { config, modules } = extractBacktestConfigSource(payload);
+    let modulesChanged = false;
+    let configChanged = false;
+    if (modules !== null) {
+      modulesChanged = updateBacktestAvailableModules(modules, { silent: true }) || modulesChanged;
+    }
+    if (config !== null) {
+      configChanged = updateBacktestConfigData(config, { silent: true }) || configChanged;
+    }
+    if (!options.silent) {
+      renderBacktestConfig({
+        updateValues: configChanged,
+        updateModules: modulesChanged,
+        updateSelection: modulesChanged || configChanged
+      });
+    } else if (modulesChanged || configChanged) {
+      renderBacktestConfig({
+        updateValues: configChanged,
+        updateModules: modulesChanged,
+        updateSelection: modulesChanged || configChanged
+      });
+    }
+    return modulesChanged || configChanged;
+  }
+
+  function renderBacktestConfig(options = {}) {
+    const statusEl = document.getElementById('backtestConfigStatus');
+    const form = document.getElementById('backtestConfigForm');
+    if (!statusEl || !form) return;
+
+    const isConnected = socket && socket.connected;
+    const disableInputs = backtestConfigLoading || backtestConfigSubmitting || backtestRunPending;
+
+    let message = '';
+    let messageClass = '';
+    if (backtestConfigLoading) {
+      message = 'Загружаем параметры бэктеста…';
+      messageClass = 'is-muted';
+    } else if (backtestConfigError) {
+      message = backtestConfigError;
+      messageClass = 'is-error';
+    } else if (backtestConfigSubmitError) {
+      message = backtestConfigSubmitError;
+      messageClass = 'is-error';
+    } else if (backtestRunError) {
+      message = backtestRunError;
+      messageClass = 'is-error';
+    } else if (backtestRunPending) {
+      message = backtestRunStatus || 'Запускаем бэктест…';
+      messageClass = 'is-muted';
+    } else if (backtestRunStatus) {
+      message = backtestRunStatus;
+      messageClass = 'is-success';
+    } else if (backtestConfigSubmitStatus) {
+      message = backtestConfigSubmitStatus;
+      messageClass = 'is-success';
+    } else if (!backtestConfigLastFetch) {
+      message = 'Ожидаем данные от сервера…';
+      messageClass = 'is-muted';
+    }
+
+    statusEl.textContent = message;
+    statusEl.className = messageClass ? `config-status ${messageClass}` : 'config-status';
+
+    const refreshButton = document.getElementById('backtestConfigRefresh');
+    if (refreshButton) {
+      refreshButton.disabled = backtestConfigLoading || backtestConfigSubmitting || backtestRunPending || !isConnected;
+    }
+
+    const saveButton = document.getElementById('backtestConfigSubmit');
+    if (saveButton) {
+      saveButton.disabled = backtestConfigLoading || backtestConfigSubmitting || !isConnected;
+    }
+
+    const runButton = document.getElementById('backtestRunButton');
+    if (runButton) {
+      runButton.disabled =
+        backtestConfigLoading ||
+        backtestConfigSubmitting ||
+        backtestRunPending ||
+        !isConnected ||
+        backtestSelectedModules.length === 0;
+    }
+
+    const updateValues = options.updateValues || backtestConfigSignature !== backtestConfigAppliedSignature;
+    const moduleOptions = getBacktestModuleOptions();
+    const moduleSignature = JSON.stringify(moduleOptions);
+    const updateModules = options.updateModules || moduleSignature !== backtestModulesAppliedSignature;
+    const selectionSignature = backtestSelectedModulesSignature;
+    const updateSelection =
+      options.updateSelection ||
+      updateModules ||
+      selectionSignature !== backtestSelectedModulesAppliedSignature;
+
+    if (updateValues) {
+      const inputs = form.querySelectorAll('[data-backtest-field]');
+      inputs.forEach((input) => {
+        const key = input.getAttribute('data-backtest-field');
+        if (!key) return;
+        if (input.type === 'checkbox') {
+          const value =
+            backtestConfig && Object.prototype.hasOwnProperty.call(backtestConfig, key)
+              ? backtestConfig[key]
+              : null;
+          input.checked = Boolean(value);
+        } else {
+          let value = '';
+          if (backtestConfig && Object.prototype.hasOwnProperty.call(backtestConfig, key)) {
+            const current = backtestConfig[key];
+            if (current !== undefined && current !== null) {
+              value = typeof current === 'number' ? String(current) : String(current);
+            }
+          }
+          input.value = value;
+        }
+      });
+      backtestConfigAppliedSignature = backtestConfigSignature;
+    }
+
+    form.querySelectorAll('[data-backtest-field]').forEach((input) => {
+      if (input.matches('input[type="checkbox"]')) {
+        input.disabled = disableInputs;
+      } else {
+        input.disabled = disableInputs;
+      }
+    });
+
+    const modulesContainer = document.getElementById('backtestModules');
+    if (modulesContainer) {
+      if (updateModules) {
+        if (moduleOptions.length) {
+          modulesContainer.innerHTML = moduleOptions
+            .map((option) => {
+              const checked = backtestSelectedModules.includes(option.value) ? ' checked' : '';
+              return `<label class="config-checkbox"><input type="checkbox" data-backtest-module="${escapeHtml(
+                option.value
+              )}"${checked}><span>${safeText(option.label)}</span></label>`;
+            })
+            .join('');
+        } else {
+          modulesContainer.innerHTML = '<div class="config-module__empty">Стратегии недоступны.</div>';
+        }
+        backtestModulesAppliedSignature = moduleSignature;
+        backtestSelectedModulesAppliedSignature = selectionSignature;
+      }
+      if (updateSelection && !updateModules) {
+        modulesContainer.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+          const value = normalizeStrategyKey(checkbox.getAttribute('data-backtest-module'), false);
+          checkbox.checked = value ? backtestSelectedModules.includes(value.toUpperCase()) : false;
+        });
+        backtestSelectedModulesAppliedSignature = selectionSignature;
+      }
+      modulesContainer.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+        checkbox.disabled = disableInputs || !isConnected;
+      });
+    }
+
+    const strategySelect = document.getElementById('backtestStrategy');
+    if (strategySelect) {
+      if (updateModules) {
+        const placeholder = '<option value="">Автовыбор (первая выбранная стратегия)</option>';
+        const optionsHtml = moduleOptions
+          .map(
+            (option) =>
+              `<option value="${escapeHtml(option.value)}">${safeText(option.label)}</option>`
+          )
+          .join('');
+        strategySelect.innerHTML = placeholder + optionsHtml;
+        backtestStrategyOptionsSignature = moduleSignature;
+      }
+      if (updateValues) {
+        const currentStrategy =
+          backtestConfig && backtestConfig.strategy ? backtestConfig.strategy : '';
+        const hasOption = moduleOptions.some((option) => option.value === currentStrategy);
+        strategySelect.value = hasOption ? currentStrategy : '';
+      }
+      strategySelect.disabled = disableInputs;
+    }
+  }
+
+  function collectBacktestConfigOverrides(form) {
+    const overrides = {};
+    let error = null;
+    let focusField = null;
+    const inputs = form.querySelectorAll('[data-backtest-field]');
+
+    outer: for (const input of inputs) {
+      const key = input.getAttribute('data-backtest-field');
+      if (!key) continue;
+      const label = input.getAttribute('data-backtest-label') || key;
+
+      if (input.type === 'checkbox') {
+        const nextValue = input.checked;
+        const currentValue = Boolean(backtestConfig && backtestConfig[key]);
+        if (nextValue !== currentValue) {
+          overrides[key] = nextValue;
+        }
+        continue;
+      }
+
+      const rawValue = input.value;
+      if (rawValue === '') {
+        continue;
+      }
+
+      const trimmed = rawValue.trim();
+      const transform = input.getAttribute('data-backtest-transform');
+      const type = (input.getAttribute('data-backtest-type') || input.type || 'text').toLowerCase();
+
+      if (type === 'number') {
+        const parsed = Number(trimmed);
+        if (!Number.isFinite(parsed)) {
+          error = `Поле «${label}» должно быть числом.`;
+          focusField = key;
+          break outer;
+        }
+        const current = parseNumeric(backtestConfig && backtestConfig[key]);
+        if (current === null || Math.abs(parsed - current) > 1e-12) {
+          overrides[key] = parsed;
+        }
+        continue;
+      }
+
+      let normalized = trimmed;
+      if (transform === 'upper') {
+        normalized = normalized.toUpperCase();
+      }
+
+      const current =
+        backtestConfig && backtestConfig[key] !== undefined && backtestConfig[key] !== null
+          ? String(backtestConfig[key])
+          : '';
+      if (normalized !== current) {
+        overrides[key] = normalized;
+      }
+    }
+
+    return { overrides, error, focusField };
+  }
+
+  function requestBacktestConfig(force = false) {
+    if (!socket || !socket.connected) {
+      if (force) {
+        backtestConfigLoading = false;
+        backtestConfigError = 'Нет соединения с сервером';
+        renderBacktestConfig();
+      }
+      return;
+    }
+
+    if (backtestConfigLoading && !force) return;
+
+    const now = Date.now();
+    if (!force && backtestConfigLastFetch && now - backtestConfigLastFetch < 10000) {
+      return;
+    }
+
+    backtestConfigLoading = true;
+    backtestConfigError = null;
+    backtestConfigSubmitError = '';
+    backtestConfigSubmitStatus = '';
+    backtestRunError = '';
+    backtestRunStatus = '';
+    renderBacktestConfig();
+
+    socket
+      .timeout(5000)
+      .emit('request_backtest_config', {}, (err, response) => {
+        backtestConfigLoading = false;
+        if (err) {
+          backtestConfigError = 'Сервер не ответил вовремя';
+          renderBacktestConfig();
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          backtestConfigError =
+            (response && response.message) || 'Не удалось получить параметры бэктеста';
+          renderBacktestConfig();
+          return;
+        }
+        applyBacktestConfigPayload(response, { silent: true });
+      });
+  }
+
+  function handleBacktestConfigSubmit(event) {
+    event.preventDefault();
+    if (backtestConfigSubmitting) return;
+
+    if (!socket || !socket.connected) {
+      backtestConfigSubmitError = 'Нет соединения с сервером.';
+      backtestConfigSubmitStatus = '';
+      renderBacktestConfig();
+      return;
+    }
+
+    const form = event.target;
+    const { overrides, error, focusField } = collectBacktestConfigOverrides(form);
+    if (error) {
+      backtestConfigSubmitError = error;
+      backtestConfigSubmitStatus = '';
+      renderBacktestConfig();
+      if (focusField) {
+        const input = form.querySelector(`[data-backtest-field="${focusField}"]`);
+        if (input) input.focus();
+      }
+      return;
+    }
+
+    if (!overrides || Object.keys(overrides).length === 0) {
+      backtestConfigSubmitError = 'Измените параметры перед сохранением.';
+      backtestConfigSubmitStatus = '';
+      renderBacktestConfig();
+      return;
+    }
+
+    backtestConfigSubmitting = true;
+    backtestConfigSubmitError = '';
+    backtestConfigSubmitStatus = '';
+    backtestRunError = '';
+    backtestRunStatus = '';
+    renderBacktestConfig();
+
+    const payload = {
+      overrides,
+      config: overrides,
+      updates: overrides
+    };
+
+    socket
+      .timeout(5000)
+      .emit('update_backtest_config', payload, (err, response) => {
+        backtestConfigSubmitting = false;
+        if (err) {
+          backtestConfigSubmitError = 'Сервер не ответил вовремя.';
+          renderBacktestConfig();
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          backtestConfigSubmitError =
+            (response && response.message) || 'Не удалось сохранить параметры бэктеста.';
+          renderBacktestConfig();
+          return;
+        }
+
+        backtestConfigSubmitStatus = response.message || 'Настройки обновлены.';
+        backtestConfigSubmitError = '';
+        applyBacktestConfigPayload(response, { silent: true });
+        requestBacktestConfig(true);
+      });
+  }
+
+  function handleBacktestRunClick(event) {
+    event.preventDefault();
+    if (backtestRunPending) return;
+
+    if (!socket || !socket.connected) {
+      backtestRunError = 'Нет соединения с сервером.';
+      backtestRunStatus = '';
+      renderBacktestConfig();
+      return;
+    }
+
+    const form = document.getElementById('backtestConfigForm');
+    if (!form) return;
+
+    const { overrides, error, focusField } = collectBacktestConfigOverrides(form);
+    if (error) {
+      backtestRunError = error;
+      backtestRunStatus = '';
+      renderBacktestConfig();
+      if (focusField) {
+        const input = form.querySelector(`[data-backtest-field="${focusField}"]`);
+        if (input) input.focus();
+      }
+      return;
+    }
+
+    const modules = backtestSelectedModules.slice();
+    if (!modules.length) {
+      backtestRunError = 'Выберите хотя бы одну стратегию для запуска бэктеста.';
+      backtestRunStatus = '';
+      renderBacktestConfig();
+      return;
+    }
+
+    const strategySelect = document.getElementById('backtestStrategy');
+    let preferredStrategy = '';
+    if (strategySelect) {
+      preferredStrategy = normalizeStrategyKey(strategySelect.value, false) || '';
+    }
+    if (!preferredStrategy && modules.length) {
+      preferredStrategy = modules[0];
+    }
+    if (preferredStrategy) {
+      preferredStrategy = preferredStrategy.toUpperCase();
+    }
+
+    backtestRunPending = true;
+    backtestRunError = '';
+    backtestRunStatus = 'Запускаем бэктест…';
+    backtestConfigSubmitError = '';
+    backtestConfigSubmitStatus = '';
+    renderBacktestConfig();
+
+    const payload = {
+      modules,
+      strategies: modules,
+      selection: modules,
+      overrides,
+      config: overrides,
+      updates: overrides
+    };
+    if (preferredStrategy) {
+      payload.strategy = preferredStrategy;
+      payload.module = preferredStrategy;
+      payload.primary = preferredStrategy;
+      if (overrides && !('strategy' in overrides)) {
+        payload.overrides = { ...overrides, strategy: preferredStrategy };
+        payload.config = payload.overrides;
+        payload.updates = payload.overrides;
+      }
+    }
+    if (payload.overrides && Object.keys(payload.overrides).length === 0) {
+      delete payload.overrides;
+      delete payload.config;
+      delete payload.updates;
+    }
+
+    socket
+      .timeout(15000)
+      .emit('run_backtest', payload, (err, response) => {
+        backtestRunPending = false;
+        if (err) {
+          backtestRunError = 'Сервер не ответил вовремя.';
+          backtestRunStatus = '';
+          renderBacktestConfig();
+          return;
+        }
+        if (!response || response.status !== 'ok') {
+          backtestRunError =
+            (response && response.message) || 'Не удалось выполнить бэктест.';
+          backtestRunStatus = '';
+          renderBacktestConfig();
+          return;
+        }
+
+        backtestRunStatus = response.message || 'Бэктест запущен.';
+        backtestRunError = '';
+        applyBacktestConfigPayload(response, { silent: true });
+        requestTradesState();
+      });
+  }
+
+  function handleBacktestModulesChange(event) {
+    const checkbox = event.target.closest('input[type="checkbox"][data-backtest-module]');
+    if (!checkbox) return;
+    const value = normalizeStrategyKey(checkbox.getAttribute('data-backtest-module'), false);
+    if (!value) return;
+    const selection = new Set(backtestSelectedModules);
+    const normalized = value.toUpperCase();
+    if (checkbox.checked) {
+      selection.add(normalized);
+    } else {
+      selection.delete(normalized);
+    }
+    const changed = setBacktestSelectedModules(Array.from(selection));
+    if (backtestRunError && selection.size) {
+      backtestRunError = '';
+      renderBacktestConfig();
+    } else if (!changed) {
+      renderBacktestConfig();
+    }
   }
 
   function extractStrategyConfigSource(payload) {
@@ -1632,6 +2683,8 @@
     } else {
       container.innerHTML = '';
     }
+
+    renderBacktestConfig({ updateModules: true, updateSelection: true });
   }
 
   function updateStrategyConfigData(data, options = {}) {
@@ -2187,6 +3240,7 @@
       applyServerMode(null);
     }
     let strategyMetadataChanged = false;
+    let backtestMetadataChanged = false;
     if (payload && typeof payload === 'object') {
       if (Object.prototype.hasOwnProperty.call(payload, 'strategy_config')) {
         strategyMetadataChanged =
@@ -2197,10 +3251,22 @@
           updateStrategyConfigData(payload.strategyConfig, { silent: true }) ||
           strategyMetadataChanged;
       }
+      if (Object.prototype.hasOwnProperty.call(payload, 'backtest_config')) {
+        backtestMetadataChanged =
+          applyBacktestConfigPayload(payload.backtest_config, { silent: true }) ||
+          backtestMetadataChanged;
+      } else if (Object.prototype.hasOwnProperty.call(payload, 'backtestConfig')) {
+        backtestMetadataChanged =
+          applyBacktestConfigPayload(payload.backtestConfig, { silent: true }) ||
+          backtestMetadataChanged;
+      }
     }
     tradesData = normalizeTradesData(payload);
     if (strategyMetadataChanged) {
       renderStrategyConfig();
+    }
+    if (backtestMetadataChanged) {
+      renderBacktestConfig({ updateValues: true, updateModules: true, updateSelection: true });
     }
     updateUI();
   }
@@ -2222,6 +3288,15 @@
       strategyConfigError = null;
       strategyConfigLoading = false;
       renderStrategyConfig();
+      backtestConfigError = null;
+      backtestConfigLoading = false;
+      backtestConfigSubmitting = false;
+      backtestRunPending = false;
+      backtestConfigSubmitError = '';
+      backtestConfigSubmitStatus = '';
+      backtestRunError = '';
+      backtestRunStatus = '';
+      renderBacktestConfig();
       if (!currentMode && !awaitingModeConfirmation) {
         setModePending(true);
       }
@@ -2233,6 +3308,7 @@
       requestTradesState();
       requestModuleHealth();
       requestStrategyConfig(true);
+      requestBacktestConfig(true);
     });
 
     socket.on('disconnect', (reason) => {
@@ -2244,6 +3320,15 @@
       strategyConfigSubmitting = false;
       strategyConfigError = 'Нет соединения с сервером';
       renderStrategyConfig();
+      backtestConfigLoading = false;
+      backtestConfigSubmitting = false;
+      backtestRunPending = false;
+      backtestRunStatus = '';
+      backtestRunError = '';
+      backtestConfigSubmitStatus = '';
+      backtestConfigSubmitError = '';
+      backtestConfigError = 'Нет соединения с сервером';
+      renderBacktestConfig();
       if (!currentMode) {
         awaitingModeConfirmation = false;
         pendingModeSelection = null;
@@ -2267,6 +3352,15 @@
         return;
       }
       applyStrategyConfigPayload(payload);
+    });
+    socket.on('backtest_config', (payload) => {
+      backtestConfigLoading = false;
+      if (payload && payload.status && payload.status !== 'ok') {
+        backtestConfigError = payload.message || 'Не удалось получить параметры бэктеста';
+        renderBacktestConfig();
+        return;
+      }
+      applyBacktestConfigPayload(payload);
     });
   }
 
@@ -2692,12 +3786,30 @@
     }
 
     renderStrategyConfig();
+    renderBacktestConfig({ updateValues: true, updateModules: true, updateSelection: true });
     setupSocket();
 
     document.getElementById('strategyToggle').addEventListener('click', toggleStrategyPanel);
     document.getElementById('strategyClose').addEventListener('click', closeStrategyPanel);
     document.getElementById('strategyOverlay').addEventListener('click', closeStrategyPanel);
     document.getElementById('strategyList').addEventListener('click', handleStrategySelection);
+
+    const backtestForm = document.getElementById('backtestConfigForm');
+    if (backtestForm) {
+      backtestForm.addEventListener('submit', handleBacktestConfigSubmit);
+    }
+    const backtestRefresh = document.getElementById('backtestConfigRefresh');
+    if (backtestRefresh) {
+      backtestRefresh.addEventListener('click', () => requestBacktestConfig(true));
+    }
+    const backtestRunButton = document.getElementById('backtestRunButton');
+    if (backtestRunButton) {
+      backtestRunButton.addEventListener('click', handleBacktestRunClick);
+    }
+    const backtestModules = document.getElementById('backtestModules');
+    if (backtestModules) {
+      backtestModules.addEventListener('change', handleBacktestModulesChange);
+    }
 
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeStrategyPanel();

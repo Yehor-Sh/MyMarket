@@ -10,6 +10,29 @@ _logger = logging.getLogger(__name__)
 
 Number = float | int
 
+_matplotlib_modules: tuple[object, object] | None = None
+
+
+def _import_matplotlib(context: str) -> tuple[object, object] | None:
+    """Import matplotlib modules using a headless backend."""
+
+    global _matplotlib_modules
+    if _matplotlib_modules is not None:
+        return _matplotlib_modules
+
+    try:  # pragma: no cover - optional dependency
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+    except Exception as exc:  # pragma: no cover - optional dependency
+        _logger.warning("Unable to import matplotlib for %s plot: %s", context, exc)
+        return None
+
+    _matplotlib_modules = (mdates, plt)
+    return _matplotlib_modules
+
 
 def _resolve_point(
     point: Mapping[str, object] | Sequence[object]
@@ -31,12 +54,10 @@ def plot_equity_curve(
 ) -> Path | None:
     """Generate an equity curve plot."""
 
-    try:
-        import matplotlib.dates as mdates
-        import matplotlib.pyplot as plt
-    except Exception as exc:  # pragma: no cover - optional dependency
-        _logger.warning("Unable to import matplotlib for equity plot: %s", exc)
+    modules = _import_matplotlib("equity")
+    if modules is None:
         return None
+    mdates, plt = modules
 
     if not equity_curve:
         return None
@@ -85,12 +106,10 @@ def plot_price_with_trades(
 ) -> Path | None:
     """Plot the price series with entry/exit markers."""
 
-    try:
-        import matplotlib.dates as mdates
-        import matplotlib.pyplot as plt
-    except Exception as exc:  # pragma: no cover - optional dependency
-        _logger.warning("Unable to import matplotlib for price plot: %s", exc)
+    modules = _import_matplotlib("price")
+    if modules is None:
         return None
+    mdates, plt = modules
 
     if not price_series:
         return None

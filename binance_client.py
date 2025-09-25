@@ -274,14 +274,7 @@ class BinanceClient:
             return self._price_cache.get(symbol.upper())
 
     # ------------------------------- Kline handling -------------------
-    def fetch_klines(
-        self,
-        symbol: str,
-        interval: str,
-        limit: int = 100,
-        *,
-        is_backtest: bool = False,
-    ) -> List[Kline]:
+    def fetch_klines(self, symbol: str, interval: str, limit: int = 100) -> List[Kline]:
         """Fetch ``limit`` klines for ``symbol`` and cache the result."""
 
         key = (symbol.upper(), interval)
@@ -297,8 +290,7 @@ class BinanceClient:
             klines = [Kline.from_rest(entry) for entry in payload]
             with self._klines_lock:
                 self._klines_cache[key] = klines
-            if not is_backtest:
-                self.subscribe_ticker([symbol.upper()])
+            self.subscribe_ticker([symbol.upper()])
             return klines
         except Exception as exc:  # pragma: no cover - network failure fallback
             _logger.warning("Failed to fetch klines for %s: %s", symbol, exc)

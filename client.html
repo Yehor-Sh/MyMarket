@@ -329,7 +329,7 @@
       position: fixed;
       top: 56px;
       right: 46px;
-      width: min(320px, calc(100% - 40px));
+      width: min(420px, calc(100% - 48px));
       background: var(--surface-elevated);
       border-radius: var(--radius-lg);
       border: 1px solid var(--surface-border-strong);
@@ -346,6 +346,8 @@
       backdrop-filter: blur(18px);
       max-height: calc(100vh - 100px);
       overflow-y: hidden;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
     }
 
     .strategy-panel.is-open {
@@ -353,6 +355,12 @@
       opacity: 1;
       pointer-events: auto;
       overflow-y: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .strategy-panel::-webkit-scrollbar {
+      display: none;
     }
 
     .panel-header {
@@ -399,7 +407,15 @@
       gap: 8px;
       max-height: 260px;
       overflow-y: auto;
-      padding-right: 4px;
+      padding-right: 6px;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.6) 14px, rgba(0, 0, 0, 0.9) calc(100% - 14px), transparent 100%);
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.6) 14px, rgba(0, 0, 0, 0.9) calc(100% - 14px), transparent 100%);
+    }
+
+    .strategy-list::-webkit-scrollbar {
+      display: none;
     }
 
     .strategy-item {
@@ -443,25 +459,26 @@
     }
 
     .panel-actions {
-      display: flex;
-      justify-content: flex-end;
-      flex-wrap: wrap;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      align-items: stretch;
     }
 
     .panel-action {
-      padding: 12px 18px;
-      border-radius: 999px;
+      padding: 14px 20px;
+      border-radius: 18px;
       border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.07);
       color: var(--text-primary);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      font-size: 0.78rem;
+      font-weight: 600;
       cursor: pointer;
       transition: transform var(--transition), border-color var(--transition), background var(--transition);
-      min-width: 160px;
       text-align: center;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
     }
 
     .panel-action:hover,
@@ -491,7 +508,15 @@
       gap: 10px;
       max-height: 220px;
       overflow-y: auto;
-      padding-right: 4px;
+      padding-right: 6px;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.6) 14px, rgba(0, 0, 0, 0.9) calc(100% - 14px), transparent 100%);
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.6) 14px, rgba(0, 0, 0, 0.9) calc(100% - 14px), transparent 100%);
+    }
+
+    .health-list::-webkit-scrollbar {
+      display: none;
     }
 
     .health-item {
@@ -658,6 +683,7 @@
         right: 20px;
         left: 20px;
         width: auto;
+        max-width: none;
       }
     }
 
@@ -665,6 +691,10 @@
       .metrics-primary {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+      .panel-actions {
+        grid-template-columns: 1fr;
       }
 
       .metric {

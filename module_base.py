@@ -117,6 +117,23 @@ class ModuleBase(ABC):
         """Inspect the provided candles and yield signals."""
 
     # ------------------------------------------------------------------
+    def process_with_timeframes(
+        self,
+        symbol: str,
+        primary_candles: Sequence[Kline],
+        extra_candles: Dict[str, Sequence[Kline]],
+    ) -> Iterable[Signal]:
+        """Handle primary + extra timeframe data.
+
+        Strategies that do not require multi-timeframe analysis can rely on
+        this default implementation, which simply delegates to
+        :meth:`process` using the primary candles.  Modules with specific
+        multi-timeframe behaviour should override this method.
+        """
+
+        return self.process(symbol, primary_candles)
+
+    # ------------------------------------------------------------------
     def run(self, symbol: str, candles: Sequence[Kline]) -> Optional[Signal]:
         """Execute the strategy for a single symbol.
 

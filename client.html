@@ -780,6 +780,7 @@
     <div class="panel-actions">
       <button class="panel-action" type="button" onclick="requestModuleHealth(true)">Проверить здоровье</button>
       <button class="panel-action" type="button" onclick="clearCache()">Очистить кеш</button>
+      <button class="panel-action" type="button" onclick="downloadClosedTradesCsv()">Скачать CSV</button>
     </div>
   </aside>
 
@@ -1382,6 +1383,75 @@
           alert('Ошибка при очистке кеша');
         }
       });
+  }
+
+  function downloadClosedTradesCsv() {
+    const { closed } = getFilteredTrades();
+    if (!closed || closed.length === 0) {
+      alert('Нет закрытых сделок для выгрузки');
+      return;
+    }
+
+    const headers = [
+      'symbol',
+      'strategy',
+      'direction',
+      'entry_time',
+      'exit_time',
+      'entry_price',
+      'exit_price',
+      'profit_pct'
+    ];
+
+    const toCsvValue = (value) => {
+      if (value == null) return '';
+      const str = String(value);
+      if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const formatTimestamp = (value) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return '';
+      try {
+        return new Date(num).toISOString();
+      } catch (error) {
+        return '';
+      }
+    };
+
+    const formatNumber = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : '';
+    };
+
+    const rows = [
+      headers,
+      ...closed.map((trade) => [
+        trade.symbol || '',
+        trade.module || '',
+        (trade.direction || '').toUpperCase(),
+        formatTimestamp(trade.entry_time),
+        formatTimestamp(trade.exit_time),
+        formatNumber(trade.entry_price),
+        formatNumber(trade.exit_price),
+        formatNumber(trade.profit)
+      ])
+    ];
+
+    const csvContent = rows.map((row) => row.map(toCsvValue).join(',')).join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `closed_trades_${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
   </script>
 </body>

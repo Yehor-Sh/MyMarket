@@ -45,7 +45,7 @@ class Trade:
     initial_stop: float
     high_watermark: float
     low_watermark: float
-    metadata: Dict[str, float] = field(default_factory=dict)
+    metadata: Dict[str, object] = field(default_factory=dict)
     confidence: float = 1.0
     current_price: Optional[float] = None
     max_profit_pct: float = 0.0

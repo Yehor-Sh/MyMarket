@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Literal, Optional, Sequence
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence
 
 from binance_client import BinanceClient, Kline
 from multi_timeframe_config import MULTI_TIMEFRAME_CONFIG

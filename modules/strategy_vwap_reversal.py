@@ -19,7 +19,7 @@ class VWAPTrendReversalStrategy(ModuleBase):
         self,
         client,
         *,
-        interval: str = "1h",
+        interval: str = "5m",
         lookback: int = 200,
         rsi_period: int = 14,
         volume_window: int = 20,

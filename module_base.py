@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Literal, Optional, Sequence
 
 from binance_client import BinanceClient, Kline
+from multi_timeframe_config import MULTI_TIMEFRAME_CONFIG
 
 SignalSide = Literal["LONG", "SHORT"]
 
@@ -29,7 +30,10 @@ class ModuleBase(ABC):
     """Common utilities for strategy modules.
 
     Sub-classes must implement :meth:`process` that inspects a sequence of
-    klines and returns zero or more :class:`Signal` instances.
+    klines and returns zero or more :class:`Signal` instances.  Multi-timeframe
+    strategies can either declare their additional requirements via
+    ``multi_timeframe_config`` or override :meth:`process_with_timeframes` to
+    handle the extra candle data.
     """
 
     def __init__(
@@ -40,12 +44,19 @@ class ModuleBase(ABC):
         abbreviation: str,
         interval: str,
         lookback: int,
+        extra_timeframes: Mapping[str, int] | None = None,
     ) -> None:
         self.client = client
         self.name = name
         self.abbreviation = abbreviation
         self.interval = interval
         self.lookback = lookback
+        if extra_timeframes is not None:
+            self.extra_timeframes: Dict[str, int] = dict(extra_timeframes)
+        else:
+            self.extra_timeframes = dict(
+                MULTI_TIMEFRAME_CONFIG.get(self.abbreviation, {})
+            )
 
     @property
     def minimum_bars(self) -> int:
@@ -60,14 +71,41 @@ class ModuleBase(ABC):
         results: List[Signal] = []
         for symbol in symbols:
             try:
-                candles = self.client.fetch_klines(symbol, self.interval, self.lookback)
+                primary_candles = self.client.fetch_klines(
+                    symbol, self.interval, self.lookback
+                )
             except Exception:  # pragma: no cover - defensive
                 _logger.exception("failed to fetch klines for %s", symbol)
                 continue
-            if len(candles) < self.minimum_bars:
+            if len(primary_candles) < self.minimum_bars:
+                continue
+
+            extra_candles: Dict[str, Sequence[Kline]] = {}
+            missing_timeframe_data = False
+            for extra_interval, extra_lookback in self.extra_timeframes.items():
+                try:
+                    candles = self.client.fetch_klines(
+                        symbol, extra_interval, extra_lookback
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    _logger.exception(
+                        "failed to fetch %s klines for %s", extra_interval, symbol
+                    )
+                    missing_timeframe_data = True
+                    break
+                if len(candles) < extra_lookback:
+                    missing_timeframe_data = True
+                    break
+                extra_candles[extra_interval] = candles
+
+            if missing_timeframe_data:
                 continue
             try:
-                signals = list(self.process(symbol, candles))
+                signals = list(
+                    self.process_with_timeframes(
+                        symbol, primary_candles, extra_candles
+                    )
+                )
                 results.extend(signals)
             except Exception:  # pragma: no cover - defensive
                 _logger.exception("module %s failed for %s", self.name, symbol)

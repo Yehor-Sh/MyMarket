@@ -759,7 +759,6 @@
     </main>
 
     <footer class="control-bar">
-      <button class="control-action" type="button" onclick="closeAllTrades()">Закрыть все сделки</button>
     </footer>
   </div>
 
@@ -1345,25 +1344,6 @@
     renderModuleHealth();
     updateUI();
   });
-
-  function closeAllTrades() {
-    if (!ensureSocketConnected()) return;
-
-    socket
-      .timeout(5000)
-      .emit('close_all_trades', {}, (err, response) => {
-        if (err) {
-          alert('Сервер не ответил вовремя');
-          return;
-        }
-        if (response && response.status === 'ok') {
-          alert(`Закрыто ${response.count} сделок`);
-          requestTradesState();
-        } else {
-          alert('Ошибка при закрытии сделок');
-        }
-      });
-  }
 
   function clearCache() {
     if (!ensureSocketConnected()) return;

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence
+from typing import Dict, Iterable, List, Literal, Optional, Sequence
 
 from binance_client import BinanceClient, Kline
 from multi_timeframe_config import MULTI_TIMEFRAME_CONFIG
@@ -115,23 +115,6 @@ class ModuleBase(ABC):
     @abstractmethod
     def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
         """Inspect the provided candles and yield signals."""
-
-    # ------------------------------------------------------------------
-    def process_with_timeframes(
-        self,
-        symbol: str,
-        primary_candles: Sequence[Kline],
-        extra_candles: Mapping[str, Sequence[Kline]],
-    ) -> Iterable[Signal]:
-        """Inspect candles from the primary and any additional timeframes.
-
-        The default implementation delegates to :meth:`process` for backward
-        compatibility so that existing single-timeframe modules continue to
-        function without modification.  Multi-timeframe strategies can override
-        this hook to consume the ``extra_candles`` mapping.
-        """
-
-        return self.process(symbol, primary_candles)
 
     # ------------------------------------------------------------------
     def run(self, symbol: str, candles: Sequence[Kline]) -> Optional[Signal]:

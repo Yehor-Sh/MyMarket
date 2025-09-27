@@ -15,8 +15,9 @@ where:
 * ``lookback`` is an integer describing how many candles should be requested
   for that interval.
 
-Modules that require additional confirmation candles should either declare
-an entry here or provide the extra timeframe information explicitly when
+By default the configuration is empty so that the caching layer is agnostic to
+which modules are registered.  Individual strategies should either declare an
+entry here or provide the extra timeframe information explicitly when
 instantiating :class:`module_base.ModuleBase`.
 """
 
@@ -27,19 +28,8 @@ from typing import Dict
 MultiTimeframeConfig = Dict[str, Dict[str, int]]
 
 # NOTE: Projects can tailor this mapping to describe the additional timeframe
-# requirements for each strategy module.  The defaults below align the bundled
-# strategies with the multi-timeframe rules described in the documentation.
-MULTI_TIMEFRAME_CONFIG: MultiTimeframeConfig = {
-    # RSI Divergence (DIV) – confirm divergence and RSI extremes on H1.
-    "DIV": {"1h": 220},
-    # Pin Bar + Level + EMA (PIN) – key levels are derived from H1.
-    "PIN": {"1h": 200},
-    # Engulfing + RSI (ENG) – validate trend and momentum on M30/H1.
-    "ENG": {"30m": 160, "1h": 160},
-    # ATR + EMA Breakout (BRK) – trend alignment on H1 via EMA20/EMA50.
-    "BRK": {"1h": 200},
-    # Inside Bar Breakout (INS) – confirm EMA trend on M30.
-    "INS": {"30m": 160},
-}
+# requirements for each strategy module.  The default is intentionally empty so
+# that the tester does not assume the presence of specific built-in modules.
+MULTI_TIMEFRAME_CONFIG: MultiTimeframeConfig = {}
 
 __all__ = ["MULTI_TIMEFRAME_CONFIG", "MultiTimeframeConfig"]

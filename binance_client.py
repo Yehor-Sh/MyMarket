@@ -369,21 +369,33 @@ class BinanceClient:
                 _logger.exception("price listener failed for %s", symbol)
 
     def _fetch_ticker_prices(self, symbols: Iterable[str]) -> Dict[str, float]:
-        import json
-
         payload: Dict[str, float] = {}
         symbols_list = [s.upper() for s in symbols if s and s.endswith("USDT")]
         chunk_size = 50
 
         for i in range(0, len(symbols_list), chunk_size):
-            chunk = symbols_list[i:i + chunk_size]
+            chunk = symbols_list[i : i + chunk_size]
             params = {"symbols": json.dumps(chunk)}
-            response = self._session.get(
-                f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",
-                params=params,
-                timeout=5,
-            )
-            response.raise_for_status()
+            try:
+                response = self._session.get(
+                    f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",
+                    params=params,
+                    timeout=5,
+                )
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                status_code = exc.response.status_code if exc.response else None
+                if status_code == 400:
+                    chunk_payload, skipped = self._fetch_chunk_with_fallback(chunk)
+                    payload.update(chunk_payload)
+                    if skipped:
+                        _logger.warning(
+                            "Skipping invalid Binance symbols: %s",
+                            ", ".join(sorted(skipped)),
+                        )
+                    continue
+                raise
+
             data = response.json()
 
             # Защита от неожиданных ответов
@@ -394,6 +406,36 @@ class BinanceClient:
                     except (KeyError, ValueError, TypeError):
                         continue
         return payload
+
+    def _fetch_chunk_with_fallback(
+        self, chunk: Sequence[str]
+    ) -> Tuple[Dict[str, float], List[str]]:
+        """Fetch ticker prices symbol-by-symbol when a batch request fails."""
+
+        chunk_payload: Dict[str, float] = {}
+        skipped: List[str] = []
+        for symbol in chunk:
+            try:
+                response = self._session.get(
+                    f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",
+                    params={"symbol": symbol},
+                    timeout=5,
+                )
+                response.raise_for_status()
+            except requests.HTTPError:
+                skipped.append(symbol)
+                continue
+            except requests.RequestException:
+                skipped.append(symbol)
+                continue
+
+            try:
+                entry = response.json()
+                chunk_payload[symbol.upper()] = float(entry["price"])
+            except (ValueError, KeyError, TypeError):
+                skipped.append(symbol)
+
+        return chunk_payload, skipped
 
 
     def _queue_ws_subscription(self, symbols: Iterable[str]) -> None:

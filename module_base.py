@@ -33,7 +33,8 @@ class ModuleBase(ABC):
     klines and returns zero or more :class:`Signal` instances.  Multi-timeframe
     strategies can either declare their additional requirements via
     ``multi_timeframe_config`` or override :meth:`process_with_timeframes` to
-    handle the extra candle data.
+    handle the extra candle data.  When no extra timeframes are provided the
+    module only fetches the primary interval, keeping the cache module-agnostic.
     """
 
     def __init__(
@@ -46,6 +47,21 @@ class ModuleBase(ABC):
         lookback: int,
         extra_timeframes: Mapping[str, int] | None = None,
     ) -> None:
+        """Create a module description.
+
+        Parameters
+        ----------
+        client:
+            Binance data source used to fetch candles.
+        name / abbreviation / interval / lookback:
+            Basic configuration of the strategy.
+        extra_timeframes:
+            Optional mapping of additional intervals to request.  When omitted
+            the module falls back to :data:`multi_timeframe_config.MULTI_TIMEFRAME_CONFIG`
+            for its abbreviation.  Because the default configuration is empty,
+            modules opt into extra candle fetching explicitly, ensuring the
+            tester remains agnostic to unused strategies.
+        """
         self.client = client
         self.name = name
         self.abbreviation = abbreviation

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 # -*- coding: utf-8 -*-
 
 import json
@@ -7,7 +9,6 @@ import time
 import uuid
 from typing import Dict, List, Any, Optional
 
-import httpx
 import requests
 
 SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8080")

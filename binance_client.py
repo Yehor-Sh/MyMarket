@@ -116,12 +116,16 @@ class BinanceClient:
         Maximum last price to be considered liquid.
     session : requests.Session, optional
         Custom HTTP session; useful for injecting mocks during tests.
+    offline_pairs : Sequence[str], optional
+        Pre-defined list of symbols to use when a live refresh fails and the
+        cache is empty.  Defaults to ``("BTCUSDT", "ETHUSDT")``.
     """
 
     DEFAULT_EXCLUDED_KEYWORDS = ("UP", "DOWN", "BULL", "BEAR")
     DEFAULT_EXCLUDED_BASES = {"USDT", "DAI", "EUR", "GBP"}.union(
         coin for coin in EXCLUDE_STABLE if len(coin) <= 5
     )
+    DEFAULT_OFFLINE_PAIRS: Sequence[str] = ("BTCUSDT", "ETHUSDT")
 
     def __init__(
         self,
@@ -132,6 +136,7 @@ class BinanceClient:
         min_price: float = MIN_PRICE,
         max_price: float = MAX_PRICE,
         session: Optional[requests.Session] = None,
+        offline_pairs: Optional[Sequence[str]] = None,
     ) -> None:
         self._session = session or requests.Session()
         self._ticker_interval = ticker_interval
@@ -165,6 +170,11 @@ class BinanceClient:
         self._ws_pending: Deque[str] = deque()
         self._ws_pending_set: Set[str] = set()
         self._ws_request_id = 0
+        self._offline_pairs: List[str] = (
+            list(offline_pairs)
+            if offline_pairs is not None
+            else list(self.DEFAULT_OFFLINE_PAIRS)
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -357,10 +367,28 @@ class BinanceClient:
         """
 
         now = time.time()
-        if force_refresh or now - self._last_liquidity_refresh > self._liquidity_refresh_interval:
-            self._refresh_liquid_pairs()
+        should_refresh = (
+            force_refresh
+            or now - self._last_liquidity_refresh > self._liquidity_refresh_interval
+        )
+        if should_refresh:
+            try:
+                self._refresh_liquid_pairs()
+            except Exception as exc:  # pragma: no cover - defensive network guard
+                _logger.warning(
+                    "liquidity refresh failed, using cached snapshot: %s", exc
+                )
         with self._liquidity_lock:
-            return list(self._liquid_pairs)
+            cached_pairs = list(self._liquid_pairs)
+
+        if cached_pairs:
+            return cached_pairs
+
+        if should_refresh and not cached_pairs:
+            _logger.warning(
+                "liquidity cache empty, falling back to %d offline pairs", len(self._offline_pairs)
+            )
+        return list(self._offline_pairs)
 
     # ------------------------------------------------------------------
     # Internal helpers

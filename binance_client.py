@@ -237,17 +237,6 @@ class BinanceClient:
             self._liquid_pairs.clear()
             self._last_liquidity_refresh = 0.0
 
-    def clear_caches(self) -> None:
-        """Clear local price, kline and liquidity caches."""
-
-        with self._price_lock:
-            self._price_cache.clear()
-        with self._klines_lock:
-            self._klines_cache.clear()
-        with self._liquidity_lock:
-            self._liquid_pairs.clear()
-            self._last_liquidity_refresh = 0.0
-
     # ------------------------------- Price handling -------------------
     def subscribe_ticker(self, symbols: Iterable[str]) -> None:
         """Subscribe the ticker updater to additional symbols."""

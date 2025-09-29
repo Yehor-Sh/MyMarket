@@ -157,5 +157,25 @@ class MarketSnapshotTests(unittest.TestCase):
         )
 
 
+class WebSocketErrorTests(unittest.TestCase):
+    def test_on_ws_error_closes_socket(self) -> None:
+        client = BinanceClient()
+
+        class _FakeWebSocket:
+            def __init__(self) -> None:
+                self.closed = False
+                self.keep_running = True
+
+            def close(self) -> None:
+                self.closed = True
+
+        fake_ws = _FakeWebSocket()
+
+        client._on_ws_error(fake_ws, RuntimeError("boom"))
+
+        self.assertTrue(fake_ws.closed, "websocket should be closed after error")
+        self.assertFalse(fake_ws.keep_running, "keep_running flag should be cleared")
+
+
 if __name__ == "__main__":  # pragma: no cover - manual execution helper
     unittest.main()

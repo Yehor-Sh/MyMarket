@@ -44,7 +44,15 @@ class _RecordingSession:
         self.calls.append({"url": url, "params": params, "timeout": timeout})
         if params and "symbols" in params:
             symbols = json.loads(params["symbols"])
-            payload = [{"symbol": symbol, "price": "1.0"} for symbol in symbols]
+            payload = [
+                {
+                    "symbol": symbol,
+                    "price": "1.0",
+                    "lastPrice": "1.0",
+                    "priceChangePercent": "2.5",
+                }
+                for symbol in symbols
+            ]
         else:
             symbol = params.get("symbol") if params else "UNKNOWN"
             payload = {"symbol": symbol, "price": "1.0"}
@@ -125,6 +133,28 @@ class FetchTickerPricesTests(unittest.TestCase):
         self.assertGreater(len(session.calls), 1, "expected multiple REST calls for large batch")
         for symbol in symbols:
             self.assertEqual(result[symbol], 1.0)
+
+
+class MarketSnapshotTests(unittest.TestCase):
+    def test_get_market_snapshot_uses_compact_symbol_payload(self) -> None:
+        session = _RecordingSession()
+        client = BinanceClient(session=session)
+
+        result = client.get_market_snapshot(["ethusdt", "BTCUSDT"])
+
+        self.assertGreaterEqual(len(session.calls), 1, "expected REST call to be recorded")
+        params = session.calls[0]["params"]
+        expected_payload = json.dumps(["ETHUSDT", "BTCUSDT"], separators=(",", ":"))
+        self.assertIn("symbols", params)
+        self.assertEqual(params["symbols"], expected_payload)
+
+        self.assertEqual(
+            result,
+            {
+                "ETHUSDT": {"price": 1.0, "percent_change": 2.5},
+                "BTCUSDT": {"price": 1.0, "percent_change": 2.5},
+            },
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution helper

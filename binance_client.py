@@ -306,7 +306,7 @@ class BinanceClient:
         try:
             response = self._session.get(
                 f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/24hr",
-                params={"symbols": json.dumps(normalized)},
+                params={"symbols": json.dumps(normalized, separators=(",", ":"))},
                 timeout=10,
             )
             response.raise_for_status()

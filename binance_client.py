@@ -594,6 +594,14 @@ class BinanceClient:
     def _on_ws_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         self._ws_connected.clear()
         _logger.warning("binance websocket error: %s", error)
+        try:
+            ws.keep_running = False
+        except Exception:  # pragma: no cover - defensive
+            pass
+        try:
+            ws.close()
+        except Exception:  # pragma: no cover - defensive
+            pass
 
     def _on_ws_message(self, ws: websocket.WebSocketApp, message: str) -> None:
         try:

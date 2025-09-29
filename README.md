@@ -28,4 +28,8 @@ python orchestrator.py
 The web interface becomes available at <http://localhost:8080>.  The
 orchestrator automatically starts the Binance client and all strategy workers.
 Networking failures are tolerated – when the Binance API is unreachable the
-system continues to operate with the latest cached data.
+system continues to operate with the latest cached data.  If the client is
+started without a previously cached liquidity snapshot it automatically falls
+back to a small offline list of symbols (``BTCUSDT``/``ETHUSDT`` by default).
+The fallback list can be overridden by passing ``offline_pairs`` to
+``BinanceClient`` or wiring the parameter through your own configuration.

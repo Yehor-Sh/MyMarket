@@ -1080,14 +1080,75 @@
     return Number.isFinite(num) ? num.toFixed(digits) : '-';
   }
 
-  function formatTime(value) {
-    if (!value) return '-';
-    const num = Number(value);
-    if (Number.isFinite(num)) {
-      const date = new Date(num);
-      return date.toISOString().replace('T', ' ').substring(0, 16);
+  function toIsoString(value) {
+    if (value === undefined || value === null || value === '') {
+      return '';
     }
-    return String(value).replace('T', ' ').substring(0, 16);
+
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return '';
+
+      const numericCandidate = Number(trimmed);
+      if (Number.isFinite(numericCandidate)) {
+        const dateFromNumber = new Date(numericCandidate);
+        if (!Number.isNaN(dateFromNumber.getTime())) {
+          return dateFromNumber.toISOString();
+        }
+      }
+
+      const dateFromString = new Date(trimmed);
+      if (!Number.isNaN(dateFromString.getTime())) {
+        return dateFromString.toISOString();
+      }
+    }
+
+    return '';
+  }
+
+  function formatTime(value) {
+    const iso = toIsoString(value);
+    if (iso) {
+      return iso.replace('T', ' ').substring(0, 16);
+    }
+
+    if (value === undefined || value === null) return '-';
+
+    const raw = String(value).trim();
+    return raw ? raw.replace('T', ' ').substring(0, 16) : '-';
+  }
+
+  function formatPrice(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(4) : '';
+  }
+
+  function formatPercent(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : '';
+  }
+
+  function formatConfidence(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : '';
+  }
+
+  function formatMetadata(value) {
+    if (value === undefined || value === null) return '';
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return '';
+    }
   }
 
   function formatHealthTime(value) {
@@ -1131,14 +1192,33 @@
     });
 
     result.closed = closedList.map((trade) => {
-      const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
+      const profitCandidate =
+        trade.profit_pct ?? trade.profit ?? trade.current_profit_pct ?? trade.current_profit;
+      const maxProfitCandidate = trade.max_profit_pct ?? trade.max_profit;
+      const tradeId =
+        trade.trade_id || trade.id || trade.tradeId || trade.uuid || trade.uid || trade.identifier;
+
       return {
+        trade_id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
         module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
+        strategy: (trade.strategy || trade.module || trade.abcde || '').toString().trim(),
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         exit_price: trade.exit_price,
-        profit: profit !== undefined && profit !== null ? Number(profit) : null,
+        trailing_stop: trade.trailing_stop,
+        initial_stop: trade.initial_stop,
+        high_watermark: trade.high_watermark,
+        low_watermark: trade.low_watermark,
+        profit: profitCandidate !== undefined && profitCandidate !== null ? Number(profitCandidate) : null,
+        profit_pct:
+          profitCandidate !== undefined && profitCandidate !== null ? Number(profitCandidate) : null,
+        max_profit_pct:
+          maxProfitCandidate !== undefined && maxProfitCandidate !== null
+            ? Number(maxProfitCandidate)
+            : null,
+        confidence: trade.confidence,
+        metadata: trade.metadata,
         entry_time: trade.entry_time || trade.opened_at,
         exit_time: trade.exit_time || trade.closed_at
       };
@@ -1643,14 +1723,23 @@
     }
 
     const headers = [
+      'trade_id',
       'symbol',
       'strategy',
+      'module',
       'direction',
       'entry_time',
       'exit_time',
       'entry_price',
       'exit_price',
-      'profit_pct'
+      'trailing_stop',
+      'initial_stop',
+      'high_watermark',
+      'low_watermark',
+      'profit_pct',
+      'max_profit_pct',
+      'confidence',
+      'metadata'
     ];
 
     const toCsvValue = (value) => {
@@ -1662,32 +1751,26 @@
       return str;
     };
 
-    const formatTimestamp = (value) => {
-      const num = Number(value);
-      if (!Number.isFinite(num)) return '';
-      try {
-        return new Date(num).toISOString();
-      } catch (error) {
-        return '';
-      }
-    };
-
-    const formatNumber = (value) => {
-      const num = Number(value);
-      return Number.isFinite(num) ? num : '';
-    };
-
     const rows = [
       headers,
       ...closed.map((trade) => [
+        trade.trade_id || '',
         trade.symbol || '',
+        trade.strategy || '',
         trade.module || '',
         (trade.direction || '').toUpperCase(),
-        formatTimestamp(trade.entry_time),
-        formatTimestamp(trade.exit_time),
-        formatNumber(trade.entry_price),
-        formatNumber(trade.exit_price),
-        formatNumber(trade.profit)
+        toIsoString(trade.entry_time),
+        toIsoString(trade.exit_time),
+        formatPrice(trade.entry_price),
+        formatPrice(trade.exit_price),
+        formatPrice(trade.trailing_stop),
+        formatPrice(trade.initial_stop),
+        formatPrice(trade.high_watermark),
+        formatPrice(trade.low_watermark),
+        formatPercent(trade.profit_pct),
+        formatPercent(trade.max_profit_pct),
+        formatConfidence(trade.confidence),
+        formatMetadata(trade.metadata)
       ])
     ];
 

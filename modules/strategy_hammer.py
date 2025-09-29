@@ -50,7 +50,12 @@ class HammerStrategy(ModuleBase):
     def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
         return self.process_with_timeframes(symbol, candles, {})
 
-    def process_with_timeframes(self, symbol: str, primary_candles: Sequence[Kline], extra_candles: Dict[str, Sequence[Kline]]) -> Iterable[Signal]:
+    def process_with_timeframes(
+        self,
+        symbol: str,
+        primary_candles: Sequence[Kline],
+        extra_candles: Dict[str, Sequence[Kline]],
+    ) -> Iterable[Signal]:
         candles = primary_candles
         if len(candles) < self.Cfg.lookback:
             return []

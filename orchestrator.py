@@ -9,12 +9,14 @@ import pkgutil
 import queue
 import threading
 import uuid
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime
 from itertools import zip_longest
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+from indicators import base_metadata
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
@@ -95,7 +97,7 @@ class Trade:
 
     def _close(self, price: float) -> None:
         self.exit_price = price
-        self.closed_at = datetime.utcnow()
+        self.closed_at = datetime.now().astimezone()
         self.profit_pct = self._calculate_profit_pct(price)
         self.current_profit_pct = self.profit_pct or 0.0
         self.max_profit_pct = max(self.max_profit_pct, self.current_profit_pct)
@@ -176,6 +178,9 @@ class Orchestrator:
         self.client.add_price_listener(self._handle_price_update)
         self._register_routes()
         self._register_socket_handlers()
+
+        self.market_context: Dict[str, dict] = {}
+        self._last_ctx: float = 0.0
 
     # ------------------------------------------------------------------
     def _register_routes(self) -> None:
@@ -346,8 +351,13 @@ class Orchestrator:
             try:
                 signal = self.signal_queue.get(timeout=1.0)
             except queue.Empty:
+                # обновляем контекст каждые 60 секунд
+                if (self._last_ctx + 60) < time.time():
+                    self._update_market_context()
+                    self._broadcast_state()
+                    self._last_ctx = time.time()
                 continue
-            self._handle_signal(signal)
+            self._handle_signal(signal))
 
     # ------------------------------------------------------------------
     def _handle_signal(self, signal: Signal) -> None:
@@ -377,7 +387,7 @@ class Orchestrator:
             strategy=signal.strategy,
             entry_price=price,
             quantity=1.0,
-            opened_at=datetime.utcnow(),
+            opened_at=datetime.now(),
             trailing_percent=self.trailing_percent,
             trailing_stop=initial_stop,
             initial_stop=initial_stop,
@@ -479,7 +489,7 @@ class Orchestrator:
         return len(closed_payloads)
 
     # ------------------------------------------------------------------
-    from datetime import datetime, UTC
+    from datetime import datetime
 
     def _serialize_state(self) -> Dict[str, object]:
         with self._lock:
@@ -490,7 +500,8 @@ class Orchestrator:
         return {
             "active": active,
             "closed": closed,
-            "server_time": datetime.now(UTC).isoformat(),
+            "server_time": datetime.now().isoformat(),
+            "context": getattr(self, "market_context", {}),
         }
 
     # ------------------------------------------------------------------
@@ -526,6 +537,22 @@ class Orchestrator:
             snapshot = worker.get_health()
             health.append(snapshot.to_dict(is_alive=worker.is_alive()))
         return health
+    
+    def _update_market_context(self):
+        context = {}
+        for symbol in ["BTCUSDT", "ETHUSDT"]:
+            try:
+                candles = self.client.fetch_klines(symbol, "15m", 120)
+                meta = base_metadata(candles)
+                context[symbol] = {
+                    "trend": meta.get("trend", "FLAT"),
+                    "ema_fast": meta.get("ema_fast"),
+                    "ema_slow": meta.get("ema_slow"),
+                    "ema_anchor": meta.get("ema_anchor"),
+                }
+            except Exception:
+                context[symbol] = {"trend": "N/A"}
+        self.market_context = context
 
 
 def create_app() -> Tuple[Flask, Orchestrator, SocketIO]:

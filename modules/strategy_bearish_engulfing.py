@@ -1,48 +1,10 @@
-
 from __future__ import annotations
-from typing import Iterable, Sequence
-from binance_client import BinanceClient
-from module_base import Kline, ModuleBase, Signal
+from typing import Iterable, Sequence, Dict
+from binance_client import BinanceClient, Kline
+from module_base import ModuleBase, Signal
+from indicators import ema, atr, rsi, base_metadata, passes_sanity
 
-# ---- Small utility helpers kept local to avoid extra dependencies ----
-def _ema(values, period: int) -> float:
-    if not values or period <= 1:
-        return values[-1] if values else 0.0
-    p = min(period, len(values))
-    # seed with SMA
-    sma = sum(values[-p:]) / p
-    k = 2 / (p + 1)
-    ema_val = sma
-    for v in values[-p+1:]:
-        ema_val = v * k + ema_val * (1 - k)
-    return ema_val
-
-def _atr(candles: Sequence[Kline], period: int) -> float:
-    if len(candles) < period + 1:
-        return 0.0
-    trs = []
-    for i in range(-period, 0):
-        c = candles[i]
-        prev = candles[i-1]
-        tr = max(c.high - c.low, abs(c.high - prev.close), abs(c.low - prev.close))
-        trs.append(tr)
-    return sum(trs) / len(trs)
-
-def _median(xs):
-    s = sorted(xs)
-    n = len(s)
-    if n == 0: 
-        return 0.0
-    mid = n // 2
-    if n % 2 == 1:
-        return float(s[mid])
-    return (s[mid-1] + s[mid]) / 2.0
-
-def _soft_confidence(strength: float, lo=0.55, hi=0.95) -> float:
-    # squashed to [lo, hi]
-    x = max(0.0, min(2.0, strength)) / 2.0
-    return lo + (hi - lo) * x
-
+# ---- Shared helpers for candle anatomy ----
 def _body(c: Kline) -> float:
     return abs(c.close - c.open)
 
@@ -52,44 +14,115 @@ def _is_bull(c: Kline) -> bool:
 def _is_bear(c: Kline) -> bool:
     return c.close < c.open
 
+def _last(values):
+    return values[-1] if values else None
+
+def _confidence(score: float, lo: float = 0.5, hi: float = 0.98) -> float:
+    # squash to [lo, hi] with soft cap
+    score = max(0.0, min(2.0, score)) / 2.0
+    return lo + (hi - lo) * score
+
+def _trend_ok(meta: Dict[str, float], want: str) -> bool:
+    t = meta.get("trend", "FLAT")
+    return t == want
+
+def _near(value: float, target: float, tol: float) -> bool:
+    if target == 0:
+        return False
+    return abs(value - target) / abs(target) <= tol
 
 class BearishEngulfingStrategy(ModuleBase):
     class Cfg:
         interval = "15m"
-        lookback = 60
-        ema_fast = 20
-        ema_slow = 50
-        atr_len = 14
-        min_body_atr = 0.4
-        soft_gap_eps = 0.002
+        lookback = 80
+        min_atr_pct = 0.0008
+        min_rel_vol = 0.9
+        # HTF filters
+        rsi1h_min = 45 if "SHORT" == "LONG" else 0
+        rsi1h_max = 100 if "SHORT" == "LONG" else 55
+        ema_anchor_tol = 0.01  # 1% proximity penalty
 
     def __init__(self, client: BinanceClient) -> None:
-        super().__init__(client, name="Bearish Engulfing+ATR", abbreviation="BENGF+", interval=self.Cfg.interval, lookback=self.Cfg.lookback)
+        super().__init__(
+            client,
+            name="BearishEngulfing",
+            abbreviation="BENGF+",
+            interval=self.Cfg.interval,
+            lookback=self.Cfg.lookback,
+            extra_timeframes={"30m": 120, "1h": 120}
+        )
 
     def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
-        if len(candles) < max(self.Cfg.lookback, 6):
+        # Fallback path if extra TFs are not supplied by worker config
+        return self.process_with_timeframes(symbol, candles, {})
+
+    def process_with_timeframes(
+        self,
+        symbol: str,
+        primary_candles: Sequence[Kline],
+        extra_candles: Dict[str, Sequence[Kline]],
+    ) -> Iterable[Signal]:
+        candles = primary_candles
+        if len(candles) < self.Cfg.lookback:
             return []
-        c1, c2 = candles[-2], candles[-1]
+
+        meta = base_metadata(candles)
+        if not passes_sanity(meta, min_atr_pct=self.Cfg.min_atr_pct, min_rel_vol=self.Cfg.min_rel_vol):
+            return []
+
+        last = candles[-1]
         closes = [c.close for c in candles]
-        atr = _atr(candles, self.Cfg.atr_len)
-        if atr <= 0:
+        e20_series = ema(closes, 20)
+        e50_series = ema(closes, 50)
+        e200_series = ema(closes, 200)
+        e20 = _last(e20_series)
+        e50 = _last(e50_series)
+        e200 = _last(e200_series)
+        atr_val_series = atr(candles, 14)
+        atr_val = _last(atr_val_series) or 0.0
+        atr_pct = (atr_val / last.close) if last.close else 0.0
+
+        # HTF filters
+        rsi1h_ok = True
+        trend_ok = True
+        if extra_candles.get("1h"):
+            rsi1h = _last(rsi([c.close for c in extra_candles["1h"]], 14)) or 50
+            if "SHORT" == "LONG":
+                rsi1h_ok = rsi1h >= self.Cfg.rsi1h_min
+            else:
+                rsi1h_ok = rsi1h <= self.Cfg.rsi1h_max
+            # trend from 1h
+            meta1h = base_metadata(extra_candles["1h"])
+            trend_ok = _trend_ok(meta1h, "DOWN")
+        else:
+            trend_ok = _trend_ok(meta, "DOWN")
+
+        if not (rsi1h_ok and trend_ok):
             return []
 
-        ema_fast = _ema(closes, self.Cfg.ema_fast)
-        ema_slow = _ema(closes, self.Cfg.ema_slow)
-        if not (ema_fast < ema_slow):
+        # penalty if bouncing right into EMA200
+        ema_anchor_penalty = 0.0
+        if e200 and _near(last.close, e200, self.Cfg.ema_anchor_tol):
+            ema_anchor_penalty = 0.15
+
+        sig = (c1, c2 = candles[-2], candles[-1]
+cond_prev_bull = _is_bull(c1)
+engulf = _is_bear(c2) and c2.close <= c1.open and c2.open >= c1.close
+size_ok = (_body(c2) / (atr_val or 1e-9)) >= 0.35
+ema_trend = e20 and e50 and e20 < e50
+if cond_prev_bull and engulf and size_ok and ema_trend:
+    strength = (_body(c2) / (atr_val or 1e-9))
+    conf = _confidence(strength)
+    return Signal(symbol=symbol, side="SHORT", strategy=self.abbreviation, confidence=conf, metadata={"pattern":"bearish_engulfing"})
+return None
+)
+        if sig is None:
             return []
-
-        cond1 = _is_bull(c1)
-        soft_gap_ok = c2.open >= c1.close * (1 - self.Cfg.soft_gap_eps)
-        engulf = c2.close <= c1.open and _is_bear(c2)
-        size_ok = _body(c2) / atr >= self.Cfg.min_body_atr
-
-        if cond1 and soft_gap_ok and engulf and size_ok:
-            strength = (_body(c2) - _body(c1)) / atr
-            conf = _soft_confidence(strength)
-            meta = {"c1": (c1.open, c1.close), "c2": (c2.open, c2.close), "ema_fast": ema_fast, "ema_slow": ema_slow, "atr": atr}
-            return [self.make_signal(symbol, "SHORT", confidence=conf, metadata=meta)]
-        return []
+        # Adjust confidence for environment
+        sig_conf = sig.confidence * (1.0 - ema_anchor_penalty)
+        meta_out = dict(sig.metadata or {})
+        meta_out.update(meta)
+        meta_out.update({"atr_value": atr_val, "atr_pct": atr_pct, "ema20": e20, "ema50": e50, "ema200": e200})
+        return [Signal(symbol=symbol.upper(), side=sig.side, strategy=self.abbreviation, confidence=max(0.4, min(0.99, sig_conf)), metadata=meta_out)]
 
 __all__ = ["BearishEngulfingStrategy"]

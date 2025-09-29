@@ -16,7 +16,7 @@ from datetime import datetime
 from itertools import zip_longest
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from indicators import base_metadata
+from modules.indicators import base_metadata
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
@@ -357,7 +357,7 @@ class Orchestrator:
                     self._broadcast_state()
                     self._last_ctx = time.time()
                 continue
-            self._handle_signal(signal))
+            self._handle_signal(signal)
 
     # ------------------------------------------------------------------
     def _handle_signal(self, signal: Signal) -> None:

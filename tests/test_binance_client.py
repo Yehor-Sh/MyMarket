@@ -1,3 +1,4 @@
+import json
 import threading
 import unittest
 from typing import Iterable, List, Optional
@@ -33,6 +34,21 @@ class _DummySession:
         response = self._responses[self._index]
         self._index += 1
         return response
+
+
+class _RecordingSession:
+    def __init__(self) -> None:
+        self.calls: List[dict] = []
+
+    def get(self, url: str, *, params=None, timeout: float) -> _DummyResponse:  # type: ignore[override]
+        self.calls.append({"url": url, "params": params, "timeout": timeout})
+        if params and "symbols" in params:
+            symbols = json.loads(params["symbols"])
+            payload = [{"symbol": symbol, "price": "1.0"} for symbol in symbols]
+        else:
+            symbol = params.get("symbol") if params else "UNKNOWN"
+            payload = {"symbol": symbol, "price": "1.0"}
+        return _DummyResponse(200, payload)
 
 
 class _SingleRunEvent:
@@ -97,6 +113,18 @@ class FetchTickerPricesTests(unittest.TestCase):
 
         self.assertFalse(thread.is_alive(), "ticker loop did not finish in time")
         self.assertEqual(received, [("ETHUSDT", 3500.0)])
+
+    def test_fetch_ticker_prices_splits_large_batches(self) -> None:
+        symbols = [f"COIN{i:03d}USDT" for i in range(120)]
+        session = _RecordingSession()
+        client = BinanceClient(session=session)
+
+        result = client._fetch_ticker_prices(symbols)
+
+        self.assertEqual(len(result), len(symbols))
+        self.assertGreater(len(session.calls), 1, "expected multiple REST calls for large batch")
+        for symbol in symbols:
+            self.assertEqual(result[symbol], 1.0)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution helper

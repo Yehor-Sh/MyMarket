@@ -9,14 +9,12 @@ import pkgutil
 import queue
 import threading
 import uuid
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import zip_longest
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from modules.indicators import base_metadata
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
@@ -27,6 +25,9 @@ from module_worker import ModuleHealth, ModuleWorker
 
 
 _logger = logging.getLogger(__name__)
+
+
+MARKET_CONTEXT_SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT"]
 
 
 @dataclass
@@ -179,8 +180,8 @@ class Orchestrator:
         self._register_routes()
         self._register_socket_handlers()
 
-        self.market_context: Dict[str, dict] = {}
-        self._last_ctx: float = 0.0
+        self.market_context: Dict[str, Dict[str, object]] = {}
+        self._context_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     def _register_routes(self) -> None:
@@ -315,6 +316,7 @@ class Orchestrator:
             # In environments without network access the orchestrator can still
             # operate using cached/synthetic data.
             pass
+        self.client.subscribe_ticker(MARKET_CONTEXT_SYMBOLS)
         self._stop_event.clear()
         self._signal_thread = threading.Thread(target=self._signal_loop, daemon=True)
         self._signal_thread.start()
@@ -351,11 +353,6 @@ class Orchestrator:
             try:
                 signal = self.signal_queue.get(timeout=1.0)
             except queue.Empty:
-                # обновляем контекст каждые 60 секунд
-                if (self._last_ctx + 60) < time.time():
-                    self._update_market_context()
-                    self._broadcast_state()
-                    self._last_ctx = time.time()
                 continue
             self._handle_signal(signal)
 
@@ -421,6 +418,9 @@ class Orchestrator:
             updates.append(trade.to_dict())
             if was_closed:
                 closed.append(trade)
+
+        if symbol in MARKET_CONTEXT_SYMBOLS:
+            self._refresh_market_context()
 
         closed_payloads: List[Dict[str, object]] = []
         if closed:
@@ -489,19 +489,20 @@ class Orchestrator:
         return len(closed_payloads)
 
     # ------------------------------------------------------------------
-    from datetime import datetime
-
     def _serialize_state(self) -> Dict[str, object]:
+        self._refresh_market_context()
         with self._lock:
             active = [trade.to_dict() for trade in self.active_trades.values()]
             closed = [trade.to_dict() for trade in self.closed_trades]
         active.sort(key=lambda x: x["opened_at"], reverse=True)
         closed.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
+        with self._context_lock:
+            context = {symbol: dict(data) for symbol, data in self.market_context.items()}
         return {
             "active": active,
             "closed": closed,
             "server_time": datetime.now().astimezone().isoformat(),
-            "context": getattr(self, "market_context", {}),
+            "context": context,
         }
 
     # ------------------------------------------------------------------
@@ -538,23 +539,30 @@ class Orchestrator:
             health.append(snapshot.to_dict(is_alive=worker.is_alive()))
         return health
     
-    def _update_market_context(self):
-        context = {}
-        for symbol in ["BTCUSDT", "ETHUSDT"]:
-            try:
-                candles = self.client.fetch_klines(symbol, "15m", 120)
-                meta = base_metadata(candles)
-                last_close = candles[-1].close if candles else None
-                context[symbol] = {
-                    "price": last_close,
-                    "trend": meta.get("trend", "FLAT"),
-                    "ema_fast": meta.get("ema_fast"),
-                    "ema_slow": meta.get("ema_slow"),
-                    "ema_anchor": meta.get("ema_anchor"),
-                }
-            except Exception:
-                context[symbol] = {"price": None, "trend": "N/A"}
-        self.market_context = context
+    def _refresh_market_context(self) -> None:
+        snapshot = self.client.get_market_snapshot(MARKET_CONTEXT_SYMBOLS)
+        with self._context_lock:
+            context: Dict[str, Dict[str, object]] = {}
+            for symbol in MARKET_CONTEXT_SYMBOLS:
+                entry = snapshot.get(symbol, {})
+                price = entry.get("price") if isinstance(entry, dict) else None
+                change = entry.get("percent_change") if isinstance(entry, dict) else None
+                try:
+                    price_value = float(price) if price is not None else None
+                except (TypeError, ValueError):
+                    price_value = None
+                try:
+                    change_value = float(change) if change is not None else None
+                except (TypeError, ValueError):
+                    change_value = None
+                trend = "FLAT"
+                if change_value is not None:
+                    if change_value > 0:
+                        trend = "UP"
+                    elif change_value < 0:
+                        trend = "DOWN"
+                context[symbol] = {"price": price_value, "trend": trend}
+            self.market_context = context
 
 
 def create_app() -> Tuple[Flask, Orchestrator, SocketIO]:

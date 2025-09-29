@@ -287,6 +287,65 @@ class BinanceClient:
             with self._klines_lock:
                 return list(self._klines_cache.get(key, []))
 
+    def get_market_snapshot(
+        self, symbols: Sequence[str]
+    ) -> Dict[str, Dict[str, Optional[float]]]:
+        """Return last price and 24h percentage change for ``symbols``.
+
+        The data is sourced from the ``/api/v3/ticker/24hr`` endpoint.  The
+        helper gracefully degrades by falling back to the local price cache
+        when a network error occurs so tests without network access keep
+        functioning.
+        """
+
+        normalized = [symbol.upper() for symbol in symbols if symbol]
+        if not normalized:
+            return {}
+
+        snapshot: Dict[str, Dict[str, Optional[float]]] = {}
+        try:
+            response = self._session.get(
+                f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/24hr",
+                params={"symbols": json.dumps(normalized)},
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            entries = payload if isinstance(payload, list) else [payload]
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                symbol = str(entry.get("symbol", "")).upper()
+                if symbol not in normalized:
+                    continue
+                price = entry.get("lastPrice")
+                change = entry.get("priceChangePercent")
+                try:
+                    price_value = float(price) if price is not None else None
+                except (TypeError, ValueError):
+                    price_value = None
+                try:
+                    change_value = float(change) if change is not None else None
+                except (TypeError, ValueError):
+                    change_value = None
+                snapshot[symbol] = {
+                    "price": price_value,
+                    "percent_change": change_value,
+                }
+        except Exception as exc:  # pragma: no cover - network failure fallback
+            _logger.warning("Failed to fetch market snapshot: %s", exc)
+
+        if len(snapshot) != len(normalized):
+            with self._price_lock:
+                for symbol in normalized:
+                    data = snapshot.setdefault(symbol, {})
+                    if "price" not in data:
+                        cached_price = self._price_cache.get(symbol)
+                        data["price"] = cached_price
+                    data.setdefault("percent_change", None)
+
+        return snapshot
+
     # ------------------------------- Liquidity ------------------------
     def get_liquid_pairs(self, force_refresh: bool = False) -> List[str]:
         """Return a filtered list of liquid pairs.

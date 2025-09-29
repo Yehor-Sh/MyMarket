@@ -31,6 +31,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from urllib.parse import quote
 
 import requests
 import websocket
@@ -371,11 +372,27 @@ class BinanceClient:
     def _fetch_ticker_prices(self, symbols: Iterable[str]) -> Dict[str, float]:
         payload: Dict[str, float] = {}
         symbols_list = [s.upper() for s in symbols if s and s.endswith("USDT")]
-        chunk_size = 50
 
-        for i in range(0, len(symbols_list), chunk_size):
-            chunk = symbols_list[i : i + chunk_size]
-            params = {"symbols": json.dumps(chunk)}
+        if not symbols_list:
+            return payload
+
+        batches: List[List[str]] = []
+        current_batch: List[str] = []
+
+        for symbol in symbols_list:
+            candidate = current_batch + [symbol]
+            encoded_length = len(quote(json.dumps(candidate, separators=(",", ":")), safe=""))
+            if current_batch and encoded_length > 512:
+                batches.append(current_batch)
+                current_batch = [symbol]
+            else:
+                current_batch = candidate
+
+        if current_batch:
+            batches.append(current_batch)
+
+        for chunk in batches:
+            params = {"symbols": json.dumps(chunk, separators=(",", ":"))}
             try:
                 response = self._session.get(
                     f"{BINANCE_REST_ENDPOINT}/api/v3/ticker/price",

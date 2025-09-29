@@ -94,6 +94,13 @@
       color: var(--danger);
     }
 
+    .metrics-secondary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 14px 26px;
+    }
+
     .selected-strategy {
       display: inline-flex;
       align-items: center;
@@ -115,6 +122,76 @@
       font-weight: 600;
       text-transform: none;
       letter-spacing: normal;
+    }
+
+    .market-context {
+      display: inline-flex;
+      align-items: center;
+      gap: 18px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--surface-border);
+      backdrop-filter: blur(12px);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+    }
+
+    .market-context__item {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      position: relative;
+      padding-left: 10px;
+    }
+
+    .market-context__item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .market-context__item:first-child::before {
+      display: none;
+    }
+
+    .market-context__symbol {
+      letter-spacing: 0.1em;
+    }
+
+    .market-context__price {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: normal;
+    }
+
+    .market-context__trend {
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .market-context__item--up .market-context__trend {
+      color: var(--accent);
+    }
+
+    .market-context__item--down .market-context__trend {
+      color: var(--danger);
+    }
+
+    .market-context__item--flat .market-context__trend {
+      color: var(--text-secondary);
     }
 
     .menu-toggle {
@@ -659,6 +736,27 @@
         gap: 14px 24px;
       }
 
+      .metrics-secondary {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .market-context {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 12px 18px;
+      }
+
+      .market-context__item {
+        padding-left: 0;
+      }
+
+      .market-context__item::before {
+        display: none;
+      }
+
       .selected-strategy {
         align-self: flex-start;
       }
@@ -691,6 +789,17 @@
       .metrics-primary {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+      .market-context {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .market-context__item {
+        width: 100%;
+        justify-content: space-between;
       }
 
       .panel-actions {
@@ -733,7 +842,21 @@
             <span class="value" id="total-profit">+0.00%</span>
           </div>
         </div>
-        <div class="selected-strategy">стратегия: <span id="selectedStrategyName">все стратегии</span></div>
+        <div class="metrics-secondary">
+          <div class="selected-strategy">стратегия: <span id="selectedStrategyName">все стратегии</span></div>
+          <div class="market-context" id="marketContext" aria-live="polite">
+            <div class="market-context__item market-context__item--flat" data-symbol="BTCUSDT">
+              <span class="market-context__symbol">BTCUSDT</span>
+              <span class="market-context__price" data-role="price">—</span>
+              <span class="market-context__trend" data-role="trend">⟷ FLAT</span>
+            </div>
+            <div class="market-context__item market-context__item--flat" data-symbol="ETHUSDT">
+              <span class="market-context__symbol">ETHUSDT</span>
+              <span class="market-context__price" data-role="price">—</span>
+              <span class="market-context__trend" data-role="trend">⟷ FLAT</span>
+            </div>
+          </div>
+        </div>
       </div>
       <button class="menu-toggle" id="strategyToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="strategyPanel">
         <span class="menu-toggle__label">стратегии</span>
@@ -817,6 +940,17 @@
   const STRATEGY_ALL = '__all__';
   let tradesData = { active: [], closed: [] };
   let selectedStrategy = STRATEGY_ALL;
+  const MARKET_CONTEXT_SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
+  const DEFAULT_TREND = 'FLAT';
+  let marketContext = MARKET_CONTEXT_SYMBOLS.reduce((acc, symbol) => {
+    acc[symbol] = { price: null, trend: DEFAULT_TREND };
+    return acc;
+  }, {});
+  const TREND_ARROWS = {
+    UP: '▲',
+    DOWN: '▼',
+    FLAT: '⟷'
+  };
   let socket = null;
   const HEALTH_STATUS_LABELS = {
     ok: 'OK',
@@ -836,6 +970,110 @@
   let moduleHealthLoading = false;
   let moduleHealthError = null;
   let lastHealthFetch = 0;
+
+  function normalizeTrend(value) {
+    if (value === null || value === undefined) return DEFAULT_TREND;
+    const normalized = String(value).trim().toUpperCase();
+    if (['UP', 'BULLISH', 'LONG', 'RISE'].includes(normalized)) return 'UP';
+    if (['DOWN', 'BEARISH', 'SHORT', 'FALL'].includes(normalized)) return 'DOWN';
+    if (['FLAT', 'SIDEWAYS', 'NEUTRAL'].includes(normalized)) return 'FLAT';
+    return DEFAULT_TREND;
+  }
+
+  function formatMarketPrice(value) {
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      if (Math.abs(num) >= 1000) {
+        return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+      }
+      if (Math.abs(num) >= 1) {
+        return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      return num.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+    }
+    return value !== undefined && value !== null && value !== '' ? String(value) : '—';
+  }
+
+  function renderMarketContext() {
+    const container = document.getElementById('marketContext');
+    if (!container) return;
+
+    const trendClasses = ['market-context__item--up', 'market-context__item--down', 'market-context__item--flat'];
+
+    container.querySelectorAll('.market-context__item').forEach((item) => {
+      const symbol = item.getAttribute('data-symbol');
+      const state = marketContext[symbol] || { price: null, trend: DEFAULT_TREND };
+      const priceEl = item.querySelector('[data-role="price"]');
+      const trendEl = item.querySelector('[data-role="trend"]');
+      const normalizedTrend = normalizeTrend(state.trend);
+
+      if (priceEl) {
+        priceEl.textContent = formatMarketPrice(state.price);
+      }
+
+      if (trendEl) {
+        const arrow = TREND_ARROWS[normalizedTrend] || TREND_ARROWS.FLAT;
+        trendEl.textContent = `${arrow} ${normalizedTrend}`;
+      }
+
+      trendClasses.forEach((cls) => item.classList.remove(cls));
+      const trendClass = normalizedTrend === 'UP'
+        ? 'market-context__item--up'
+        : normalizedTrend === 'DOWN'
+        ? 'market-context__item--down'
+        : 'market-context__item--flat';
+      item.classList.add(trendClass);
+    });
+  }
+
+  function updateMarketContext(context) {
+    if (context && typeof context === 'object') {
+      Object.entries(context).forEach(([symbol, rawValue]) => {
+        if (!marketContext[symbol]) {
+          marketContext[symbol] = { price: null, trend: DEFAULT_TREND };
+        }
+
+        const current = marketContext[symbol];
+        const source = rawValue && typeof rawValue === 'object' ? rawValue : { price: rawValue };
+
+        const priceCandidate =
+          source.price ??
+          source.last_price ??
+          source.last ??
+          source.close ??
+          source.value ??
+          null;
+        if (priceCandidate !== null && priceCandidate !== undefined) {
+          const num = Number(priceCandidate);
+          current.price = Number.isFinite(num) ? num : priceCandidate;
+        }
+
+        let trendCandidate =
+          source.trend ??
+          source.direction ??
+          source.state ??
+          (typeof source.change === 'number'
+            ? source.change > 0
+              ? 'UP'
+              : source.change < 0
+              ? 'DOWN'
+              : 'FLAT'
+            : undefined);
+
+        if (trendCandidate === undefined && typeof source.change_pct === 'number') {
+          trendCandidate = source.change_pct > 0 ? 'UP' : source.change_pct < 0 ? 'DOWN' : 'FLAT';
+        }
+
+        if (trendCandidate === undefined && typeof source.percent_change === 'number') {
+          trendCandidate = source.percent_change > 0 ? 'UP' : source.percent_change < 0 ? 'DOWN' : 'FLAT';
+        }
+
+        current.trend = normalizeTrend(trendCandidate);
+      });
+    }
+
+    renderMarketContext();
+  }
 
   function nfix(value, digits = 4) {
     const num = Number(value);
@@ -1024,6 +1262,7 @@
 
   function handleTradesPayload(payload) {
     tradesData = normalizeTradesData(payload);
+    updateMarketContext(payload && payload.context);
     updateUI();
   }
 
@@ -1373,6 +1612,7 @@
     });
 
     renderModuleHealth();
+    renderMarketContext();
     updateUI();
   });
 

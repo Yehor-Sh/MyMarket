@@ -500,7 +500,7 @@ class Orchestrator:
         return {
             "active": active,
             "closed": closed,
-            "server_time": datetime.now().isoformat(),
+            "server_time": datetime.now().astimezone().isoformat(),
             "context": getattr(self, "market_context", {}),
         }
 
@@ -544,14 +544,16 @@ class Orchestrator:
             try:
                 candles = self.client.fetch_klines(symbol, "15m", 120)
                 meta = base_metadata(candles)
+                last_close = candles[-1].close if candles else None
                 context[symbol] = {
+                    "price": last_close,
                     "trend": meta.get("trend", "FLAT"),
                     "ema_fast": meta.get("ema_fast"),
                     "ema_slow": meta.get("ema_slow"),
                     "ema_anchor": meta.get("ema_anchor"),
                 }
             except Exception:
-                context[symbol] = {"trend": "N/A"}
+                context[symbol] = {"price": None, "trend": "N/A"}
         self.market_context = context
 
 

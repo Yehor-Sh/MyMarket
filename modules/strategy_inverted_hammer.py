@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence, Dict
 from binance_client import BinanceClient, Kline
 from module_base import ModuleBase, Signal
-from modules.indicators import ema, atr, rsi, base_metadata, passes_sanity
+from modules.indicators import ema, atr, base_metadata, passes_sanity
 
 def _body(c: Kline) -> float:
     return abs(c.close - c.open)
@@ -47,7 +47,11 @@ class InvertedHammerStrategy(ModuleBase):
             extra_timeframes={"30m": 120, "1h": 120}
         )
 
-    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+    def process(
+        self,
+        symbol: str,
+        candles: Sequence[Kline],
+    ) -> Iterable[Signal]:
         return self.process_with_timeframes(symbol, candles, {})
 
     def process_with_timeframes(
@@ -61,14 +65,16 @@ class InvertedHammerStrategy(ModuleBase):
             return []
 
         meta = base_metadata(candles)
-        if not passes_sanity(meta, min_atr_pct=self.Cfg.min_atr_pct, min_rel_vol=self.Cfg.min_rel_vol):
+        if not passes_sanity(
+            meta,
+            min_atr_pct=self.Cfg.min_atr_pct,
+            min_rel_vol=self.Cfg.min_rel_vol,
+        ):
             return []
 
-        last = candles[-1]
         closes = [c.close for c in candles]
         e20 = _last(ema(closes, 20))
         e50 = _last(ema(closes, 50))
-        e200 = _last(ema(closes, 200))
         atr_val = _last(atr(candles, 14)) or 0.0
 
         # Confirm higher timeframe trend
@@ -77,13 +83,33 @@ class InvertedHammerStrategy(ModuleBase):
         if not trend_ok:
             return []
 
-        c=candles[-1]; body=_body(c)
-        upper=c.high-max(c.open,c.close); lower=min(c.open,c.close)-c.low
-        if upper>=1.6*body and lower<=0.5*body and _is_bull(c):
-            if max(body,upper)/(atr_val or 1e-9)>=0.35 and e20 and e50 and e20<e50:
-                strength=upper/(atr_val or 1e-9)
-                conf=_confidence(strength)
-                return [self.make_signal(symbol,"LONG",confidence=conf,metadata={"pattern":"inverted_hammer"})]
+        current = candles[-1]
+        body = _body(current)
+        upper_wick = current.high - max(current.open, current.close)
+        lower_wick = min(current.open, current.close) - current.low
+        atr_safe = atr_val or 1e-9
+
+        has_long_upper_wick = upper_wick >= 1.6 * body
+        has_small_lower_wick = lower_wick <= 0.5 * body
+        long_setup = (
+            has_long_upper_wick
+            and has_small_lower_wick
+            and _is_bull(current)
+        )
+
+        if long_setup and e20 and e50 and e20 < e50:
+            dominant_move = max(body, upper_wick) / atr_safe
+            strong_move = dominant_move >= 0.35
+
+            if strong_move:
+                confidence = _confidence(upper_wick / atr_safe)
+                signal = self.make_signal(
+                    symbol,
+                    "LONG",
+                    confidence=confidence,
+                    metadata={"pattern": "inverted_hammer"},
+                )
+                return [signal]
         return []
 
 

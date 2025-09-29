@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence, Dict
 from binance_client import BinanceClient, Kline
 from module_base import ModuleBase, Signal
-from modules.indicators import ema, atr, rsi, base_metadata, passes_sanity
+from modules.indicators import ema, atr, base_metadata, passes_sanity
 
 def _body(c: Kline) -> float:
     return abs(c.close - c.open)
@@ -47,7 +47,11 @@ class DarkCloudCoverStrategy(ModuleBase):
             extra_timeframes={"30m": 120, "1h": 120}
         )
 
-    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+    def process(
+        self,
+        symbol: str,
+        candles: Sequence[Kline],
+    ) -> Iterable[Signal]:
         return self.process_with_timeframes(symbol, candles, {})
 
     def process_with_timeframes(
@@ -61,14 +65,16 @@ class DarkCloudCoverStrategy(ModuleBase):
             return []
 
         meta = base_metadata(candles)
-        if not passes_sanity(meta, min_atr_pct=self.Cfg.min_atr_pct, min_rel_vol=self.Cfg.min_rel_vol):
+        if not passes_sanity(
+            meta,
+            min_atr_pct=self.Cfg.min_atr_pct,
+            min_rel_vol=self.Cfg.min_rel_vol,
+        ):
             return []
 
-        last = candles[-1]
         closes = [c.close for c in candles]
         e20 = _last(ema(closes, 20))
         e50 = _last(ema(closes, 50))
-        e200 = _last(ema(closes, 200))
         atr_val = _last(atr(candles, 14)) or 0.0
 
         # Confirm higher timeframe trend
@@ -77,15 +83,38 @@ class DarkCloudCoverStrategy(ModuleBase):
         if not trend_ok:
             return []
 
-        c1, c2 = candles[-2], candles[-1]
-        if _is_bull(c1):
-            body1=_body(c1)
-            pen_level=c1.open+body1*0.5
-            if _is_bear(c2) and c2.close<pen_level and c2.open>=c1.high*0.999:
-                if (_body(c2)/(atr_val or 1e-9))>=0.3 and e20 and e50 and e20>e50:
-                    strength=(c1.close-c2.close)/(atr_val or 1e-9)
-                    conf=_confidence(strength)
-                    return [self.make_signal(symbol,"SHORT",confidence=conf,metadata={"pattern":"dark_cloud_cover"})]
+        previous = candles[-2]
+        current = candles[-1]
+
+        if not _is_bull(previous):
+            return []
+
+        body_previous = _body(previous)
+        penetration_level = previous.open + body_previous * 0.5
+        opens_near_high = current.open >= previous.high * 0.999
+        closes_deep = current.close < penetration_level
+
+        if (
+            _is_bear(current)
+            and opens_near_high
+            and closes_deep
+            and e20
+            and e50
+            and e20 > e50
+        ):
+            atr_safe = atr_val or 1e-9
+            body_ratio = _body(current) / atr_safe
+
+            if body_ratio >= 0.3:
+                drop_strength = (previous.close - current.close) / atr_safe
+                confidence = _confidence(drop_strength)
+                signal = self.make_signal(
+                    symbol,
+                    "SHORT",
+                    confidence=confidence,
+                    metadata={"pattern": "dark_cloud_cover"},
+                )
+                return [signal]
         return []
 
 

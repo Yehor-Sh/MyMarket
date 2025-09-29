@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence, Dict
 from binance_client import BinanceClient, Kline
 from module_base import ModuleBase, Signal
-from modules.indicators import ema, atr, rsi, base_metadata, passes_sanity
+from modules.indicators import ema, atr, base_metadata, passes_sanity
 
 def _body(c: Kline) -> float:
     return abs(c.close - c.open)
@@ -47,7 +47,11 @@ class BullishEngulfingStrategy(ModuleBase):
             extra_timeframes={"30m": 120, "1h": 120}
         )
 
-    def process(self, symbol: str, candles: Sequence[Kline]) -> Iterable[Signal]:
+    def process(
+        self,
+        symbol: str,
+        candles: Sequence[Kline],
+    ) -> Iterable[Signal]:
         return self.process_with_timeframes(symbol, candles, {})
 
     def process_with_timeframes(
@@ -61,14 +65,16 @@ class BullishEngulfingStrategy(ModuleBase):
             return []
 
         meta = base_metadata(candles)
-        if not passes_sanity(meta, min_atr_pct=self.Cfg.min_atr_pct, min_rel_vol=self.Cfg.min_rel_vol):
+        if not passes_sanity(
+            meta,
+            min_atr_pct=self.Cfg.min_atr_pct,
+            min_rel_vol=self.Cfg.min_rel_vol,
+        ):
             return []
 
-        last = candles[-1]
         closes = [c.close for c in candles]
         e20 = _last(ema(closes, 20))
         e50 = _last(ema(closes, 50))
-        e200 = _last(ema(closes, 200))
         atr_val = _last(atr(candles, 14)) or 0.0
 
         # Confirm higher timeframe trend
@@ -77,12 +83,32 @@ class BullishEngulfingStrategy(ModuleBase):
         if not trend_ok:
             return []
 
-        c1, c2 = candles[-2], candles[-1]
-        if _is_bear(c1) and _is_bull(c2) and c2.close >= c1.open and c2.open <= c1.close:
-            if (_body(c2) / (atr_val or 1e-9)) >= 0.35 and e20 and e50 and e20 > e50:
-                strength = _body(c2)/(atr_val or 1e-9)
-                conf = _confidence(strength)
-                return [self.make_signal(symbol,"LONG",confidence=conf,metadata={"pattern":"bullish_engulfing"})]
+        previous = candles[-2]
+        current = candles[-1]
+
+        closes_inside = (
+            current.close >= previous.open
+            and current.open <= previous.close
+        )
+        pattern_matches = (
+            _is_bear(previous)
+            and _is_bull(current)
+            and closes_inside
+        )
+
+        if pattern_matches and e20 and e50 and e20 > e50:
+            atr_safe = atr_val or 1e-9
+            body_ratio = _body(current) / atr_safe
+
+            if body_ratio >= 0.35:
+                confidence = _confidence(body_ratio)
+                signal = self.make_signal(
+                    symbol,
+                    "LONG",
+                    confidence=confidence,
+                    metadata={"pattern": "bullish_engulfing"},
+                )
+                return [signal]
         return []
 
 

@@ -1180,35 +1180,12 @@
 
     result.active = activeList.map((trade) => {
       const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
-      const tradeId = (
-        trade.trade_id ||
-        trade.id ||
-        trade.tradeId ||
-        trade.uuid ||
-        trade.uid ||
-        trade.identifier
-      );
-      const statusCandidate =
-        trade.status !== undefined && trade.status !== null
-          ? trade.status
-          : trade.is_active === false
-          ? 'closed'
-          : trade.is_active === true
-          ? 'active'
-          : '';
-
-      const normalizedId =
-        tradeId !== undefined && tradeId !== null && String(tradeId).trim() !== ''
-          ? String(tradeId).trim()
-          : '';
-      const normalizedStatus =
-        statusCandidate !== undefined && statusCandidate !== null
-          ? String(statusCandidate).trim()
-          : '';
+      const tradeId =
+        trade.trade_id || trade.id || trade.tradeId || trade.uuid || trade.uid || trade.identifier;
 
       return {
-        trade_id: normalizedId,
-        id: normalizedId,
+        trade_id: tradeId ? String(tradeId) : '',
+        id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
         module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
         direction: (trade.direction || trade.side || '').toUpperCase(),
@@ -1641,10 +1618,52 @@
 
     clearNoDataMessage(table);
 
-    trades.forEach((trade, i) => {
-      let row = table.rows[i];
+    const existingRows = Array.from(table.rows);
+    const rowsById = new Map();
+    const anonymousRows = [];
+
+    existingRows.forEach((row) => {
+      const id = row.dataset.tradeId;
+      if (id) {
+        rowsById.set(id, row);
+      } else {
+        anonymousRows.push(row);
+      }
+    });
+
+    const claimAnonymousRow = () => {
+      if (anonymousRows.length) {
+        return anonymousRows.shift();
+      }
+      return table.insertRow();
+    };
+
+    trades.forEach((trade, index) => {
+      const rawId = trade.trade_id ?? trade.id ?? '';
+      const tradeId = rawId !== undefined && rawId !== null ? String(rawId) : '';
+
+      let row = tradeId ? rowsById.get(tradeId) : null;
+      if (row) {
+        rowsById.delete(tradeId);
+      } else if (!tradeId) {
+        row = claimAnonymousRow();
+      }
+
       if (!row) {
         row = table.insertRow();
+      }
+
+      if (tradeId) {
+        if (row.dataset.tradeId !== tradeId) {
+          row.dataset.tradeId = tradeId;
+        }
+      } else if (row.dataset.tradeId) {
+        delete row.dataset.tradeId;
+      }
+
+      const currentRow = table.rows[index];
+      if (currentRow !== row) {
+        table.insertBefore(row, currentRow || null);
       }
 
       const profitValue = Number(trade.profit);
@@ -1685,9 +1704,17 @@
       }
     });
 
-    while (table.rows.length > trades.length) {
-      table.deleteRow(table.rows.length - 1);
-    }
+    rowsById.forEach((row) => {
+      if (row.parentElement === table) {
+        table.removeChild(row);
+      }
+    });
+
+    anonymousRows.forEach((row) => {
+      if (row.parentElement === table) {
+        table.removeChild(row);
+      }
+    });
   }
 
   function updateClosedTrades(trades) {

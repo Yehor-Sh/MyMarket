@@ -1180,14 +1180,43 @@
 
     result.active = activeList.map((trade) => {
       const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
+      const tradeId = (
+        trade.trade_id ||
+        trade.id ||
+        trade.tradeId ||
+        trade.uuid ||
+        trade.uid ||
+        trade.identifier
+      );
+      const statusCandidate =
+        trade.status !== undefined && trade.status !== null
+          ? trade.status
+          : trade.is_active === false
+          ? 'closed'
+          : trade.is_active === true
+          ? 'active'
+          : '';
+
+      const normalizedId =
+        tradeId !== undefined && tradeId !== null && String(tradeId).trim() !== ''
+          ? String(tradeId).trim()
+          : '';
+      const normalizedStatus =
+        statusCandidate !== undefined && statusCandidate !== null
+          ? String(statusCandidate).trim()
+          : '';
+
       return {
+        trade_id: normalizedId,
+        id: normalizedId,
         symbol: trade.symbol,
         module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         profit: profit !== undefined && profit !== null ? Number(profit) : null,
         trailing_stop: trade.trailing_stop,
-        entry_time: trade.entry_time || trade.opened_at
+        entry_time: trade.entry_time || trade.opened_at,
+        status: normalizedStatus
       };
     });
 
@@ -1346,6 +1375,114 @@
     updateUI();
   }
 
+  function getTradeKey(trade) {
+    if (!trade || typeof trade !== 'object') return 'composite:';
+    const idCandidates = [
+      trade.trade_id,
+      trade.id,
+      trade.tradeId,
+      trade.uuid,
+      trade.uid,
+      trade.identifier
+    ];
+
+    for (const candidate of idCandidates) {
+      if (candidate !== undefined && candidate !== null) {
+        const normalized = String(candidate).trim();
+        if (normalized) {
+          return `id:${normalized}`;
+        }
+      }
+    }
+
+    const symbol = trade.symbol ? String(trade.symbol).trim().toUpperCase() : '';
+    const direction = trade.direction ? String(trade.direction).trim().toUpperCase() : '';
+    const moduleName =
+      trade.module !== undefined && trade.module !== null ? String(trade.module).trim() : '';
+    const entryTimeCandidate =
+      trade.entry_time ||
+      trade.opened_at ||
+      trade.entered_at ||
+      trade.open_at ||
+      trade.openTime ||
+      '';
+    const entryTime = entryTimeCandidate ? String(entryTimeCandidate).trim() : '';
+    const entryPrice =
+      trade.entry_price !== undefined && trade.entry_price !== null
+        ? Number(trade.entry_price)
+        : '';
+
+    return `composite:${symbol}|${direction}|${moduleName}|${entryTime}|${entryPrice}`;
+  }
+
+  function handlePriceUpdates(payload) {
+    const hasPayload = payload && typeof payload === 'object';
+    if (hasPayload && payload.context) {
+      updateMarketContext(payload.context);
+    }
+
+    const incomingTrades = hasPayload && Array.isArray(payload.trades) ? payload.trades : [];
+    if (!incomingTrades.length) {
+      updateUI();
+      return;
+    }
+
+    const normalized = normalizeTradesData({ active: incomingTrades });
+    const updates = normalized.active;
+
+    if (!updates.length) {
+      updateUI();
+      return;
+    }
+
+    const existingMap = new Map();
+    tradesData.active.forEach((trade) => {
+      const key = getTradeKey(trade);
+      existingMap.set(key, trade);
+    });
+
+    const toRemove = new Set();
+
+    updates.forEach((update) => {
+      const key = getTradeKey(update);
+      const status = String(update.status || '').toLowerCase();
+
+      if (status === 'closed') {
+        const existing = existingMap.get(key);
+        if (existing) {
+          toRemove.add(existing);
+          existingMap.delete(key);
+        }
+        return;
+      }
+
+      const existing = existingMap.get(key);
+      if (existing) {
+        Object.assign(existing, update);
+      } else {
+        const clone = { ...update };
+        tradesData.active.push(clone);
+        existingMap.set(key, clone);
+      }
+    });
+
+    if (toRemove.size) {
+      tradesData.active = tradesData.active.filter((trade) => !toRemove.has(trade));
+    }
+
+    const parseTime = (value) => {
+      if (!value) return 0;
+      const timestamp = Date.parse(value);
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    };
+
+    tradesData.active.sort(
+      (a, b) => parseTime(b.entry_time || b.opened_at) - parseTime(a.entry_time || a.opened_at)
+    );
+
+    updateUI();
+  }
+
   function requestTradesState() {
     if (!socket || !socket.connected) return;
     socket.emit('request_state');
@@ -1376,6 +1513,7 @@
     });
 
     socket.on('trades', handleTradesPayload);
+    socket.on('prices_updated', handlePriceUpdates);
   }
 
   function ensureSocketConnected() {

@@ -229,7 +229,9 @@ class Orchestrator:
             if mode not in ("global", "local"):
                 return {"status": "error", "message": "invalid mode"}
             self.trend_mode = mode
-            return {"status": "ok", "mode": self.trend_mode}
+            payload = self._broadcast_state()
+            context = payload.get("context") if isinstance(payload, dict) else None
+            return {"status": "ok", "mode": self.trend_mode, "context": context}
 
 
     # ------------------------------------------------------------------
@@ -484,9 +486,10 @@ class Orchestrator:
         return trade.to_dict()
 
     # ------------------------------------------------------------------
-    def _broadcast_state(self) -> None:
+    def _broadcast_state(self) -> Dict[str, object]:
         payload = self._serialize_state()
         self.socketio.emit("trades", payload)
+        return payload
 
     # ------------------------------------------------------------------
     def close_all_trades(self) -> int:

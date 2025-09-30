@@ -1083,23 +1083,43 @@
 
   let trendMode = "global"; // стартовый режим
 
-    function toggleTrendMode() {
-      trendMode = trendMode === "global" ? "local" : "global";
+  function setTrendModeUI(mode) {
+    const normalized = mode === "local" ? "local" : "global";
+    trendMode = normalized;
+    const container = document.getElementById("marketContext");
+    if (container) {
+      container.setAttribute("data-mode", normalized);
+      container.title = `Режим: ${normalized.toUpperCase()}`;
+    }
+  }
 
-      // меняем подпись прямо в панели
-      const container = document.getElementById("marketContext");
-      if (container) {
-        container.setAttribute("data-mode", trendMode);
-        container.title = `Режим: ${trendMode.toUpperCase()}`;
+  function toggleTrendMode() {
+    const previousMode = trendMode;
+    const nextMode = trendMode === "global" ? "local" : "global";
+    setTrendModeUI(nextMode);
+
+    if (!socket || !socket.connected) {
+      return;
+    }
+
+    socket.emit("set_trend_mode", { mode: nextMode }, (response) => {
+      if (!response || response.status !== "ok") {
+        alert("Не удалось переключить режим тренда");
+        setTrendModeUI(previousMode);
+        return;
       }
 
-      if (!socket || !socket.connected) return;
-      socket.emit("set_trend_mode", { mode: trendMode }, (response) => {
-        if (!response || response.status !== "ok") {
-          alert("Не удалось переключить режим тренда");
-        }
-      });
-    }
+      const serverMode =
+        response && typeof response.mode === "string"
+          ? response.mode.toLowerCase()
+          : nextMode;
+      setTrendModeUI(serverMode);
+
+      if (response && response.context) {
+        updateMarketContext(response.context);
+      }
+    });
+  }
 
 document.addEventListener("DOMContentLoaded", () => {
   const ctx = document.getElementById("marketContext");

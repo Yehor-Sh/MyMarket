@@ -30,7 +30,7 @@ def _make_candles(prices: List[float]) -> List[Kline]:
 def _prepare_orchestrator(
     monkeypatch: pytest.MonkeyPatch, symbol: str, candles: List[Kline]
 ) -> Tuple[Orchestrator, List[Tuple[str, str, int]]]:
-    orchestrator = Orchestrator()
+    orchestrator = Orchestrator(cluster_threshold=1)
 
     # Avoid network requests during tests.
     monkeypatch.setattr(orchestrator, "_broadcast_state", lambda: {})
@@ -66,10 +66,14 @@ def test_handle_signal_uses_primary_interval_cache(monkeypatch: pytest.MonkeyPat
     strategy = orchestrator.strategies["VWTC4H"]
     signal = strategy.make_signal(symbol, side)
 
+    clustered = orchestrator.cluster_engine.process_signals([signal])
+    assert clustered, "clustered signal should be produced when threshold is 1"
+    cluster_signal = clustered[0]
+
     assert orchestrator.client.get_price(symbol) is None
     assert orchestrator.client.get_cached_klines(symbol, "1m") == []
 
-    orchestrator._handle_signal(signal)
+    orchestrator._handle_signal(cluster_signal)
 
     # 1m fallback should have been attempted and subsequently failed.
     assert (symbol, "1m", 1) in fetch_calls
@@ -80,5 +84,8 @@ def test_handle_signal_uses_primary_interval_cache(monkeypatch: pytest.MonkeyPat
     assert orchestrator.active_trades, "trade should have been created"
     trade = next(iter(orchestrator.active_trades.values()))
     assert trade.side == side
+    assert trade.strategy == cluster_signal.strategy
+    assert trade.metadata["cluster_size"] == 1
+    assert trade.metadata["strategies"] == [strategy.abbreviation]
     assert trade.entry_price == pytest.approx(candles[-1].close)
 

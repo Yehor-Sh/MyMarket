@@ -11,12 +11,16 @@ collection, strategy evaluation and trade management.
   cache of ticker prices and klines while filtering liquid pairs.
 - **`modules/`** – Strategy modules that analyse candlestick data and emit
   trading signals without worrying about order execution.
+- **`modules/cluster_engine.py`** – Aggregates raw strategy signals into
+  clustered confirmations before they reach the orchestrator.
 - **`module_worker.py`** – Launches modules on independent threads and funnels
   signals to the orchestrator through a queue.
 - **`orchestrator.py`** – Flask + Socket.IO service that manages trades,
   applies trailing stops and streams updates to the UI over WebSocket.
 - **`client.html`** – Lightweight dashboard that subscribes to WebSocket
-  updates to display open and closed positions in real time.
+  updates to display open and closed positions in real time and exports CSV
+  snapshots enriched with cluster metadata (`cluster_size` and
+  `cluster_strategies`).
 
 ## Running locally
 

@@ -1194,6 +1194,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return Number.isFinite(num) ? num.toFixed(2) : '';
   }
 
+  function formatClusterStrategies(value) {
+    if (!Array.isArray(value) || value.length === 0) return '';
+    return value.join('|');
+  }
+
   function formatMetadata(value) {
     if (value === undefined || value === null) return '';
     try {
@@ -2036,6 +2041,8 @@ document.addEventListener("DOMContentLoaded", () => {
       'profit_pct',
       'max_profit_pct',
       'confidence',
+      'cluster_size',
+      'cluster_strategies',
       'metadata'
     ];
 
@@ -2067,6 +2074,8 @@ document.addEventListener("DOMContentLoaded", () => {
         formatPercent(trade.profit_pct),
         formatPercent(trade.max_profit_pct),
         formatConfidence(trade.confidence),
+        trade.cluster_size ?? '',
+        formatClusterStrategies(trade.cluster_strategies),
         formatMetadata(trade.metadata)
       ])
     ];

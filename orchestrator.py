@@ -14,14 +14,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import zip_longest
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
 
-from binance_client import BinanceClient
+from binance_client import BinanceClient, Kline
 from module_base import ModuleBase, Signal
 from modules.cluster_engine import ClusterEngine
+from multi_factor_engine import DEFAULT_FACTORS, FactorCallable, MultiFactorEngine
 
 
 def _normalise_strategies(
@@ -180,6 +181,8 @@ class Orchestrator:
         trend_interval: str = "1m",       # <--- добавил
         trend_lookback: int = 20,
         cluster_threshold: int = 3,
+        factor_min_pass: int = 4,
+        factor_functions: Optional[Iterable[FactorCallable]] = None,
     ) -> None:
         self.client = BinanceClient()
         self.app = Flask(__name__)
@@ -210,6 +213,8 @@ class Orchestrator:
         self.workers: List[ModuleWorker] = []
 
         self.cluster_engine = ClusterEngine(cluster_threshold)
+        factors = list(factor_functions) if factor_functions is not None else list(DEFAULT_FACTORS)
+        self.multi_factor_engine = MultiFactorEngine(factors, min_pass=factor_min_pass)
 
         self.client.add_price_listener(self._handle_price_update)
         self._register_routes()
@@ -398,6 +403,29 @@ class Orchestrator:
 
 
     # ------------------------------------------------------------------
+    def _prepare_factor_inputs(
+        self, signals: Iterable[Signal]
+    ) -> Tuple[Dict[str, Sequence[Kline]], Dict[str, Dict[str, object]]]:
+        symbols = {signal.symbol.upper() for signal in signals}
+        candle_map: Dict[str, Sequence[Kline]] = {}
+        for symbol in symbols:
+            cached = self.client.get_cached_klines(symbol, "1h")
+            if not cached:
+                try:
+                    cached = self.client.fetch_klines(symbol, "1h", 120)
+                except Exception:  # pragma: no cover - defensive fallback
+                    cached = []
+            candle_map[symbol] = cached
+        self._refresh_market_context()
+        with self._context_lock:
+            context = {
+                ctx_symbol: dict(data)
+                for ctx_symbol, data in self.market_context.items()
+            }
+        return candle_map, context
+
+
+    # ------------------------------------------------------------------
     def _signal_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
@@ -411,8 +439,15 @@ class Orchestrator:
                 except queue.Empty:
                     break
             clustered = self.cluster_engine.process_signals(raw_signals)
-            for clustered_signal in clustered:
-                self._handle_signal(clustered_signal)
+            if not clustered:
+                continue
+            if self.multi_factor_engine.has_factors:
+                candles, context = self._prepare_factor_inputs(clustered)
+            else:
+                candles, context = {}, {}
+            validated = self.multi_factor_engine.validate(clustered, candles, context)
+            for filtered_signal in validated:
+                self._handle_signal(filtered_signal)
 
     # ------------------------------------------------------------------
     def _handle_signal(self, signal: Signal) -> None:

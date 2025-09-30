@@ -1552,6 +1552,76 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     socket.on('trades', handleTradesPayload);
+    socket.on('trade_closed', (payload) => {
+      let normalizedSource = {};
+      if (Array.isArray(payload)) {
+        normalizedSource = { closed: payload };
+      } else if (payload && typeof payload === 'object') {
+        if (Array.isArray(payload.closed)) {
+          normalizedSource = { closed: payload.closed };
+        } else if (payload.closed && typeof payload.closed === 'object') {
+          normalizedSource = { closed: [payload.closed] };
+        } else if (payload.trade && typeof payload.trade === 'object') {
+          normalizedSource = { closed: [payload.trade] };
+        } else {
+          normalizedSource = { closed: [payload] };
+        }
+      }
+
+      const normalized = normalizeTradesData(normalizedSource);
+      const updates = normalized.closed;
+      if (!updates.length) {
+        return;
+      }
+
+      const activeMap = new Map();
+      tradesData.active.forEach((trade) => {
+        activeMap.set(getTradeKey(trade), trade);
+      });
+
+      const closedMap = new Map();
+      tradesData.closed.forEach((trade) => {
+        closedMap.set(getTradeKey(trade), trade);
+      });
+
+      const toRemoveActive = new Set();
+
+      updates.forEach((update) => {
+        const key = getTradeKey(update);
+        const activeMatch = activeMap.get(key);
+        if (activeMatch) {
+          toRemoveActive.add(activeMatch);
+          activeMap.delete(key);
+        }
+
+        const existingClosed = closedMap.get(key);
+        if (existingClosed) {
+          Object.assign(existingClosed, update);
+        } else {
+          const clone = { ...update };
+          tradesData.closed.push(clone);
+          closedMap.set(key, clone);
+        }
+      });
+
+      if (toRemoveActive.size) {
+        tradesData.active = tradesData.active.filter((trade) => !toRemoveActive.has(trade));
+      }
+
+      const parseTime = (value) => {
+        if (!value) return 0;
+        const timestamp = Date.parse(value);
+        return Number.isNaN(timestamp) ? 0 : timestamp;
+      };
+
+      tradesData.closed.sort(
+        (a, b) =>
+          parseTime(b.exit_time || b.entry_time) -
+          parseTime(a.exit_time || a.entry_time)
+      );
+
+      updateUI();
+    });
     socket.on('prices_updated', handlePriceUpdates);
   }
 

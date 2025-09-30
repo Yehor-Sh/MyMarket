@@ -33,3 +33,11 @@ started without a previously cached liquidity snapshot it automatically falls
 back to a small offline list of symbols (``BTCUSDT``/``ETHUSDT`` by default).
 The fallback list can be overridden by passing ``offline_pairs`` to
 ``BinanceClient`` or wiring the parameter through your own configuration.
+
+## Manual QA
+
+- **Closed trade push event:** Open the dashboard, ensure at least one active
+  trade is visible, and emit only a ``trade_closed`` Socket.IO event for that
+  trade (without broadcasting a full ``trades`` snapshot). Confirm that the
+  position disappears from the «Активные сделки» table, reappears under
+  «Закрытые сделки» and that aggregate statistics update instantly.

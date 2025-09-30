@@ -150,7 +150,10 @@ class Orchestrator:
         trailing_percent: float = 0.3,
         module_poll_interval: float = 60.0,
         max_closed_trades: int = 1000,
-        max_tracked_symbols: int = 50,
+        max_tracked_symbols: int = 200,
+        trend_mode: str = "global",       # <--- добавил
+        trend_interval: str = "1m",       # <--- добавил
+        trend_lookback: int = 20
     ) -> None:
         self.client = BinanceClient()
         self.app = Flask(__name__)
@@ -169,6 +172,10 @@ class Orchestrator:
         self.signal_queue: "queue.Queue[Signal]" = queue.Queue()
         self._signal_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+
+        self.trend_mode = trend_mode
+        self.trend_interval = trend_interval
+        self.trend_lookback = trend_lookback
 
         self.strategies: Dict[str, ModuleBase] = self._discover_strategies()
         self.modules: List[ModuleBase] = [
@@ -215,6 +222,15 @@ class Orchestrator:
         def _on_request_module_health(data=None):
             health = self.get_modules_health()
             return {"status": "ok", "health": health}
+        
+        @self.socketio.on("set_trend_mode")
+        def _on_set_trend_mode(data=None):
+            mode = (data or {}).get("mode", "").lower()
+            if mode not in ("global", "local"):
+                return {"status": "error", "message": "invalid mode"}
+            self.trend_mode = mode
+            return {"status": "ok", "mode": self.trend_mode}
+
 
     # ------------------------------------------------------------------
     def _discover_strategies(self) -> Dict[str, ModuleBase]:
@@ -345,7 +361,11 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def _symbols_provider(self) -> Iterable[str]:
         pairs = self.client.get_liquid_pairs()
-        return pairs[: self.max_tracked_symbols]
+        base = pairs[: self.max_tracked_symbols] if self.max_tracked_symbols else pairs
+        result = set(base) | {"BTCUSDT", "ETHUSDT"}
+        self.client.subscribe_ticker(result)
+        return list(result)
+
 
     # ------------------------------------------------------------------
     def _signal_loop(self) -> None:
@@ -540,29 +560,45 @@ class Orchestrator:
         return health
     
     def _refresh_market_context(self) -> None:
-        snapshot = self.client.get_market_snapshot(MARKET_CONTEXT_SYMBOLS)
-        with self._context_lock:
-            context: Dict[str, Dict[str, object]] = {}
+        context: Dict[str, Dict[str, object]] = {}
+        if self.trend_mode == "global":
+            snapshot = self.client.get_market_snapshot(MARKET_CONTEXT_SYMBOLS)
             for symbol in MARKET_CONTEXT_SYMBOLS:
                 entry = snapshot.get(symbol, {})
                 price = entry.get("price") if isinstance(entry, dict) else None
                 change = entry.get("percent_change") if isinstance(entry, dict) else None
-                try:
-                    price_value = float(price) if price is not None else None
-                except (TypeError, ValueError):
-                    price_value = None
-                try:
-                    change_value = float(change) if change is not None else None
-                except (TypeError, ValueError):
-                    change_value = None
                 trend = "FLAT"
-                if change_value is not None:
-                    if change_value > 0:
+                if change is not None:
+                    if change > 0:
                         trend = "UP"
-                    elif change_value < 0:
+                    elif change < 0:
                         trend = "DOWN"
-                context[symbol] = {"price": price_value, "trend": trend}
+                context[symbol] = {"price": price, "trend": trend}
+
+        else:  # локальный режим
+            for symbol in MARKET_CONTEXT_SYMBOLS:
+                try:
+                    candles = self.client.fetch_klines(symbol, self.trend_interval, self.trend_lookback)
+                    if not candles:
+                        continue
+                    last_close = candles[-1].close
+                    first_close = candles[0].close
+                    change_pct = (last_close - first_close) / first_close * 100
+
+                    if abs(change_pct) < 0.05:  # меньше 0.05% → флэт
+                        trend = "FLAT"
+                    elif change_pct > 0:
+                        trend = "UP"
+                    else:
+                        trend = "DOWN"
+
+                    context[symbol] = {"price": last_close, "trend": trend}
+                except Exception:
+                    continue
+
+        with self._context_lock:
             self.market_context = context
+
 
 
 def create_app() -> Tuple[Flask, Orchestrator, SocketIO]:

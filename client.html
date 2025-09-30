@@ -137,6 +137,8 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.25s ease;
     }
 
     .market-context__item {
@@ -192,6 +194,10 @@
 
     .market-context__item--flat .market-context__trend {
       color: var(--text-secondary);
+    }
+
+    .market-context:hover {
+      background: rgba(255, 255, 255, 0.08);
     }
 
     .menu-toggle {
@@ -1075,6 +1081,32 @@
     renderMarketContext();
   }
 
+  let trendMode = "global"; // стартовый режим
+
+    function toggleTrendMode() {
+      trendMode = trendMode === "global" ? "local" : "global";
+
+      // меняем подпись прямо в панели
+      const container = document.getElementById("marketContext");
+      if (container) {
+        container.setAttribute("data-mode", trendMode);
+        container.title = `Режим: ${trendMode.toUpperCase()}`;
+      }
+
+      if (!socket || !socket.connected) return;
+      socket.emit("set_trend_mode", { mode: trendMode }, (response) => {
+        if (!response || response.status !== "ok") {
+          alert("Не удалось переключить режим тренда");
+        }
+      });
+    }
+
+document.addEventListener("DOMContentLoaded", () => {
+  const ctx = document.getElementById("marketContext");
+  if (ctx) ctx.addEventListener("click", toggleTrendMode);
+});
+
+
   function nfix(value, digits = 4) {
     const num = Number(value);
     return Number.isFinite(num) ? num.toFixed(digits) : '-';
@@ -1193,7 +1225,7 @@
         profit: profit !== undefined && profit !== null ? Number(profit) : null,
         trailing_stop: trade.trailing_stop,
         entry_time: trade.entry_time || trade.opened_at,
-        status: normalizedStatus
+        status: trade.status || '—'
       };
     });
 

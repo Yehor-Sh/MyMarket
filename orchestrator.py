@@ -439,8 +439,14 @@ class Orchestrator:
             if was_closed:
                 closed.append(trade)
 
+        context_payload: Optional[Dict[str, Dict[str, object]]] = None
         if symbol in MARKET_CONTEXT_SYMBOLS:
             self._refresh_market_context()
+            with self._context_lock:
+                context_payload = {
+                    ctx_symbol: dict(data)
+                    for ctx_symbol, data in self.market_context.items()
+                }
 
         closed_payloads: List[Dict[str, object]] = []
         if closed:
@@ -450,8 +456,11 @@ class Orchestrator:
         for payload in closed_payloads:
             self.socketio.emit("trade_closed", payload)
 
-        if updates:
-            self.socketio.emit("prices_updated", {"trades": updates})
+        if updates or context_payload is not None:
+            payload: Dict[str, object] = {"trades": updates}
+            if context_payload is not None:
+                payload["context"] = context_payload
+            self.socketio.emit("prices_updated", payload)
 
         if closed_payloads:
             self._broadcast_state()

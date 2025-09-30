@@ -1426,13 +1426,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function handlePriceUpdates(payload) {
     const hasPayload = payload && typeof payload === 'object';
-    if (hasPayload && payload.context) {
-      updateMarketContext(payload.context);
+    let contextApplied = false;
+    if (hasPayload && Object.prototype.hasOwnProperty.call(payload, 'context')) {
+      const contextData = payload.context;
+      if (contextData && typeof contextData === 'object') {
+        updateMarketContext(contextData);
+        contextApplied = true;
+      } else if (contextData === null) {
+        updateMarketContext({});
+        contextApplied = true;
+      }
     }
 
     const incomingTrades = hasPayload && Array.isArray(payload.trades) ? payload.trades : [];
     if (!incomingTrades.length) {
-      updateUI();
+      if (contextApplied) {
+        updateUI();
+      }
       return;
     }
 

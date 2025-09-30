@@ -11,7 +11,7 @@ from module_base import Signal
 class ClusterEngine:
     """Aggregate raw strategy signals into cluster confirmations."""
 
-    def __init__(self, min_cluster_size: int = 3) -> None:
+    def __init__(self, min_cluster_size: int = 1) -> None:
         if min_cluster_size < 1:
             raise ValueError("min_cluster_size must be at least 1")
         self.min_cluster_size = int(min_cluster_size)

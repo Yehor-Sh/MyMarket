@@ -165,7 +165,7 @@ class MultiFactorEngine:
         self,
         factors: Iterable[FactorCallable] | None = None,
         *,
-        min_pass: int = 4,
+        min_pass: int = 3,
     ) -> None:
         self._factors: List[FactorCallable] = [
             factor for factor in (factors or []) if callable(factor)

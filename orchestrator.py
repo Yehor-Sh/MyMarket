@@ -394,6 +394,12 @@ class Orchestrator:
             if candles:
                 price = candles[-1].close
         if price is None:
+            module = self.strategies.get(signal.strategy.upper())
+            if module is not None:
+                cached_candles = self.client.get_cached_klines(symbol, module.interval)
+                if cached_candles:
+                    price = cached_candles[-1].close
+        if price is None:
             return
 
         self.client.subscribe_ticker([symbol])

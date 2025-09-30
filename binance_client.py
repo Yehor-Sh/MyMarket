@@ -297,6 +297,13 @@ class BinanceClient:
             with self._klines_lock:
                 return list(self._klines_cache.get(key, []))
 
+    def get_cached_klines(self, symbol: str, interval: str) -> List[Kline]:
+        """Return a copy of cached klines for ``symbol``/``interval`` if present."""
+
+        key = (symbol.upper(), interval)
+        with self._klines_lock:
+            return list(self._klines_cache.get(key, []))
+
     def get_market_snapshot(
         self, symbols: Sequence[str]
     ) -> Dict[str, Dict[str, Optional[float]]]:

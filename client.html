@@ -885,11 +885,12 @@
                 <th>страта</th>
                 <th>направл.</th>
                 <th>прибыль</th>
+                <th>факторы</th>
                 <th>время</th>
               </tr>
             </thead>
             <tbody id="activeTradesTable">
-              <tr><td colspan="5" class="no-data">нет активных сделок</td></tr>
+              <tr><td colspan="6" class="no-data">нет активных сделок</td></tr>
             </tbody>
           </table>
         </div>
@@ -905,12 +906,13 @@
                 <th>страта</th>
                 <th>направл.</th>
                 <th>прибыль</th>
+                <th>факторы</th>
                 <th>вход</th>
                 <th>выход</th>
               </tr>
             </thead>
             <tbody id="closedTradesTable">
-              <tr><td colspan="6" class="no-data">нет закрытых сделок</td></tr>
+              <tr><td colspan="7" class="no-data">нет закрытых сделок</td></tr>
             </tbody>
           </table>
         </div>
@@ -1208,9 +1210,50 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function extractFactorInfo(metadata) {
+    const base = { score: null, total: null, required: null, passed: [] };
+    if (!metadata || typeof metadata !== 'object') {
+      return base;
+    }
+    const passedRaw = Array.isArray(metadata.factors_passed) ? metadata.factors_passed : [];
+    const passed = passedRaw
+      .map((item) => String(item || '').trim())
+      .filter((item) => item.length > 0);
+    const scoreValue = Number(metadata.factors_score);
+    const totalValue = Number(metadata.factors_total);
+    const requiredValue = Number(metadata.factors_required);
+    const score = Number.isFinite(scoreValue) ? scoreValue : passed.length;
+    const total = Number.isFinite(totalValue) ? totalValue : (passed.length ? passed.length : null);
+    const required = Number.isFinite(requiredValue) ? requiredValue : null;
+    return {
+      score: Number.isFinite(score) ? score : null,
+      total: Number.isFinite(total) ? total : null,
+      required: Number.isFinite(required) ? required : null,
+      passed
+    };
+  }
+
   function formatHealthTime(value) {
     const formatted = formatTime(value);
     return formatted === '-' ? '—' : formatted;
+  }
+
+  function renderFactorsCell(info) {
+    if (!info) {
+      return '<div class="cell-main">—</div>';
+    }
+    const { score, total, required, passed } = info;
+    const hasCounts = Number.isFinite(score) && Number.isFinite(total);
+    const countText = hasCounts ? `${score}/${total}` : '—';
+    const requirementText =
+      Number.isFinite(required) && hasCounts && required > 0 && required !== total
+        ? `≥${required}`
+        : '';
+    const headerParts = [countText];
+    if (requirementText) headerParts.push(requirementText);
+    const header = headerParts.filter(Boolean).join(' ');
+    const listText = Array.isArray(passed) && passed.length ? passed.join(', ') : 'нет подтверждений';
+    return `<div class="cell-main">${escapeHtml(header || '—')}</div><div class="cell-sub">${escapeHtml(listText)}</div>`;
   }
 
   function escapeHtml(value) {
@@ -1239,6 +1282,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const profit = trade.profit_pct ?? trade.profit ?? trade.current_profit;
       const tradeId =
         trade.trade_id || trade.id || trade.tradeId || trade.uuid || trade.uid || trade.identifier;
+      const metadata =
+        trade.metadata && typeof trade.metadata === 'object' ? trade.metadata : {};
+      const factorInfo = extractFactorInfo(metadata);
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
@@ -1250,7 +1296,9 @@ document.addEventListener("DOMContentLoaded", () => {
         profit: profit !== undefined && profit !== null ? Number(profit) : null,
         trailing_stop: trade.trailing_stop,
         entry_time: trade.entry_time || trade.opened_at,
-        status: trade.status || '—'
+        status: trade.status || '—',
+        metadata,
+        factor_info: factorInfo
       };
     });
 
@@ -1260,6 +1308,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const maxProfitCandidate = trade.max_profit_pct ?? trade.max_profit;
       const tradeId =
         trade.trade_id || trade.id || trade.tradeId || trade.uuid || trade.uid || trade.identifier;
+      const metadata =
+        trade.metadata && typeof trade.metadata === 'object' ? trade.metadata : {};
+      const factorInfo = extractFactorInfo(metadata);
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
@@ -1281,9 +1332,10 @@ document.addEventListener("DOMContentLoaded", () => {
             ? Number(maxProfitCandidate)
             : null,
         confidence: trade.confidence,
-        metadata: trade.metadata,
+        metadata,
         entry_time: trade.entry_time || trade.opened_at,
-        exit_time: trade.exit_time || trade.closed_at
+        exit_time: trade.exit_time || trade.closed_at,
+        factor_info: factorInfo
       };
     });
 
@@ -1749,7 +1801,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!table) return;
 
     if (!trades.length) {
-      ensureNoDataMessage(table, 5, 'нет активных сделок');
+      ensureNoDataMessage(table, 6, 'нет активных сделок');
       return;
     }
 
@@ -1811,12 +1863,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const isShort = direction === 'SHORT';
       const directionClass = isShort ? 'direction-short' : 'direction-long';
       const directionSymbol = isShort ? '▼' : '▲';
+      const factorsCell = renderFactorsCell(trade.factor_info);
 
       const cells = [
         { html: `<span class="cell-main">${safeText(trade.symbol)}</span>`, className: '' },
         { html: safeText(trade.module), className: '' },
         { html: directionSymbol, className: `direction ${directionClass}` },
         { html: profitText, className: profitClass },
+        { html: factorsCell, className: '' },
         { html: escapeHtml(formatTime(trade.entry_time)), className: '' }
       ];
 
@@ -1859,7 +1913,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!table) return;
 
     if (!trades.length) {
-      ensureNoDataMessage(table, 6, 'нет закрытых сделок');
+      ensureNoDataMessage(table, 7, 'нет закрытых сделок');
       return;
     }
 
@@ -1881,12 +1935,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const directionSymbol = isShort ? '▼' : '▲';
       const entryTime = formatTime(trade.entry_time);
       const exitTime = formatTime(trade.exit_time);
+      const factorsCell = renderFactorsCell(trade.factor_info);
 
       const cells = [
         { html: `<span class="cell-main">${safeText(trade.symbol)}</span>`, className: '' },
         { html: safeText(trade.module), className: '' },
         { html: directionSymbol, className: `direction ${directionClass}` },
         { html: profitText, className: profitClass },
+        { html: factorsCell, className: '' },
         {
           html: `<div class="cell-main">${escapeHtml(nfix(trade.entry_price, 4))}</div><div class="cell-sub">${escapeHtml(entryTime)}</div>`,
           className: ''
@@ -2043,6 +2099,10 @@ document.addEventListener("DOMContentLoaded", () => {
       'confidence',
       'cluster_size',
       'cluster_strategies',
+      'factors_score',
+      'factors_total',
+      'factors_required',
+      'factors_passed',
       'metadata'
     ];
 
@@ -2076,6 +2136,12 @@ document.addEventListener("DOMContentLoaded", () => {
         formatConfidence(trade.confidence),
         trade.cluster_size ?? '',
         formatClusterStrategies(trade.cluster_strategies),
+        trade.factor_info && Number.isFinite(trade.factor_info.score) ? trade.factor_info.score : '',
+        trade.factor_info && Number.isFinite(trade.factor_info.total) ? trade.factor_info.total : '',
+        trade.factor_info && Number.isFinite(trade.factor_info.required) ? trade.factor_info.required : '',
+        trade.factor_info && Array.isArray(trade.factor_info.passed)
+          ? trade.factor_info.passed.join(' | ')
+          : '',
         formatMetadata(trade.metadata)
       ])
     ];

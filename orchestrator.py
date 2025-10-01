@@ -129,13 +129,17 @@ class Trade:
     def to_dict(self) -> Dict[str, object]:
         metadata = dict(self.metadata)
         strategies = _normalise_strategies(metadata, self.strategy)
-        metadata.setdefault("strategies", strategies)
+        metadata["strategies"] = strategies
         metadata.setdefault("cluster_size", len(strategies))
+        module_label = " · ".join(strategies) if strategies else None
+        if not module_label and self.strategy:
+            module_label = self.strategy
         return {
             "id": self.trade_id,
             "symbol": self.symbol,
             "side": self.side,
             "strategy": self.strategy,
+            "module": module_label,
             "modules": strategies,
             "entry_price": self.entry_price,
             "quantity": self.quantity,

@@ -1204,7 +1204,19 @@ document.addEventListener("DOMContentLoaded", () => {
       .join(' · ');
   }
 
-  function deriveTradeModules(trade, metadata) {
+  function normalizeModuleName(value) {
+    if (value === undefined || value === null) return '';
+    const text = String(value).replace(/\s+/g, ' ').trim();
+    if (!text || text === '—') return '';
+    return text.toUpperCase();
+  }
+
+  function toFiniteNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function collectNormalizedModules(...sources) {
     const result = [];
     const append = (value) => {
       if (Array.isArray(value)) {
@@ -1212,31 +1224,36 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (value === undefined || value === null) return;
-      const text = String(value).trim();
-      if (!text || text === '—') return;
-      if (!result.includes(text)) {
-        result.push(text);
+      if (typeof value === 'string' && /[·,|]/.test(value)) {
+        value
+          .split(/[·,|]/)
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .forEach(append);
+        return;
+      }
+      const normalized = normalizeModuleName(value);
+      if (!normalized) return;
+      if (!result.includes(normalized)) {
+        result.push(normalized);
       }
     };
 
-    const primarySources = [trade && trade.modules, metadata && metadata.strategies];
-    for (const source of primarySources) {
-      if (Array.isArray(source) && source.length) {
-        source.forEach(append);
-      }
-      if (result.length) {
-        break;
-      }
-    }
-
-    if (!result.length) {
-      append(trade && trade.primary_strategy);
-      append(trade && trade.strategy);
-      append(trade && trade.module);
-      append(trade && trade.abcde);
-    }
-
+    sources.forEach(append);
     return result;
+  }
+
+  function deriveTradeModules(trade, metadata) {
+    const primary = collectNormalizedModules(trade && trade.modules, metadata && metadata.strategies);
+    if (primary.length) {
+      return primary;
+    }
+    return collectNormalizedModules(
+      trade && trade.primary_strategy,
+      trade && trade.strategy,
+      trade && trade.module,
+      trade && trade.abcde
+    );
   }
 
   function formatMetadata(value) {
@@ -1327,13 +1344,42 @@ document.addEventListener("DOMContentLoaded", () => {
       const moduleLabel = modules.length
         ? modules.join(' · ')
         : (trade.module || trade.strategy || trade.abcde || '').toString().trim() || '—';
+      const clusterStrategies = collectNormalizedModules(
+        trade && trade.cluster_strategies,
+        metadata && metadata.cluster_strategies
+      );
+
+      if (!clusterStrategies.length) {
+        clusterStrategies.push(...modules);
+      } else {
+        modules.forEach((module) => {
+          if (!clusterStrategies.includes(module)) {
+            clusterStrategies.push(module);
+          }
+        });
+      }
+
+      let clusterSize = toFiniteNumber(trade.cluster_size);
+      if (clusterSize === null) {
+        clusterSize = toFiniteNumber(metadata.cluster_size);
+      }
+      if (clusterSize === null && clusterStrategies.length) {
+        clusterSize = clusterStrategies.length;
+      }
+
+      metadata.strategies = modules.slice();
+      metadata.cluster_strategies = clusterStrategies.slice();
+      const resolvedClusterSize = clusterSize ?? (clusterStrategies.length || null);
+      metadata.cluster_size = resolvedClusterSize;
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
         id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
         module: moduleLabel,
-        modules,
+        modules: modules.slice(),
+        cluster_size: resolvedClusterSize,
+        cluster_strategies: clusterStrategies.slice(),
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         profit: profit !== undefined && profit !== null ? Number(profit) : null,
@@ -1358,13 +1404,44 @@ document.addEventListener("DOMContentLoaded", () => {
       const moduleLabel = modules.length
         ? modules.join(' · ')
         : (trade.module || trade.strategy || trade.abcde || '').toString().trim() || '—';
+      const clusterStrategies = collectNormalizedModules(
+        trade && trade.cluster_strategies,
+        metadata && metadata.cluster_strategies
+      );
+
+      if (!clusterStrategies.length) {
+        clusterStrategies.push(...modules);
+      } else {
+        modules.forEach((module) => {
+          if (!clusterStrategies.includes(module)) {
+            clusterStrategies.push(module);
+          }
+        });
+      }
+
+      let clusterSize = toFiniteNumber(trade.cluster_size);
+      if (clusterSize === null) {
+        clusterSize = toFiniteNumber(metadata.cluster_size);
+      }
+      if (clusterSize === null && clusterStrategies.length) {
+        clusterSize = clusterStrategies.length;
+      }
+
+      metadata.strategies = modules.slice();
+      metadata.cluster_strategies = clusterStrategies.slice();
+      const resolvedClusterSize = clusterSize ?? (clusterStrategies.length || null);
+      metadata.cluster_size = resolvedClusterSize;
+
+      const primaryStrategy = modules.length
+        ? modules[0]
+        : normalizeModuleName(trade.strategy || trade.module || trade.abcde) || '';
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
         module: moduleLabel,
-        modules,
-        strategy: modules.length ? modules[0] : (trade.strategy || trade.module || trade.abcde || '').toString().trim(),
+        modules: modules.slice(),
+        strategy: primaryStrategy,
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         exit_price: trade.exit_price,
@@ -1381,6 +1458,8 @@ document.addEventListener("DOMContentLoaded", () => {
             : null,
         confidence: trade.confidence,
         metadata,
+        cluster_size: resolvedClusterSize,
+        cluster_strategies: clusterStrategies.slice(),
         entry_time: trade.entry_time || trade.opened_at,
         exit_time: trade.exit_time || trade.closed_at,
         factor_info: factorInfo
@@ -1739,9 +1818,32 @@ document.addEventListener("DOMContentLoaded", () => {
   function getFilteredTrades() {
     if (selectedStrategy === STRATEGY_ALL) return tradesData;
     const filter = selectedStrategy;
+    const matches = (trade) => {
+      if (!trade) return false;
+      const aggregated = collectNormalizedModules(
+        trade.modules,
+        trade.metadata && trade.metadata.strategies,
+        trade.cluster_strategies,
+        trade.metadata && trade.metadata.cluster_strategies,
+        trade.module
+      );
+      if (!aggregated.length) {
+        const fallback = normalizeModuleName(trade.strategy || trade.primary_strategy);
+        if (fallback) {
+          aggregated.push(fallback);
+        }
+      }
+      if (aggregated.includes(filter)) {
+        return true;
+      }
+      if (!aggregated.length) {
+        return filter === '—';
+      }
+      return false;
+    };
     return {
-      active: tradesData.active.filter((trade) => (trade.module || '—') === filter),
-      closed: tradesData.closed.filter((trade) => (trade.module || '—') === filter)
+      active: tradesData.active.filter(matches),
+      closed: tradesData.closed.filter(matches)
     };
   }
 
@@ -1755,12 +1857,36 @@ document.addEventListener("DOMContentLoaded", () => {
       return summary.get(key);
     };
 
+    const process = (trade, field) => {
+      if (!trade) return;
+      const modules = collectNormalizedModules(
+        trade.modules,
+        trade.cluster_strategies,
+        trade.metadata && trade.metadata.strategies,
+        trade.metadata && trade.metadata.cluster_strategies,
+        trade.module
+      );
+      if (!modules.length) {
+        const fallback = normalizeModuleName(trade.strategy || trade.primary_strategy);
+        if (fallback) {
+          modules.push(fallback);
+        }
+      }
+      if (!modules.length) {
+        ensure('—')[field] += 1;
+        return;
+      }
+      modules.forEach((module) => {
+        ensure(module)[field] += 1;
+      });
+    };
+
     tradesData.active.forEach((trade) => {
-      ensure(trade.module).active += 1;
+      process(trade, 'active');
     });
 
     tradesData.closed.forEach((trade) => {
-      ensure(trade.module).closed += 1;
+      process(trade, 'closed');
     });
 
     return Array.from(summary.values())
@@ -2133,6 +2259,7 @@ document.addEventListener("DOMContentLoaded", () => {
       'symbol',
       'strategy',
       'module',
+      'modules',
       'direction',
       'entry_time',
       'exit_time',
@@ -2170,6 +2297,7 @@ document.addEventListener("DOMContentLoaded", () => {
         trade.symbol || '',
         trade.strategy || '',
         trade.module || '',
+        Array.isArray(trade.modules) && trade.modules.length ? trade.modules.join(' | ') : '',
         (trade.direction || '').toUpperCase(),
         toIsoString(trade.entry_time),
         toIsoString(trade.exit_time),

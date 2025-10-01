@@ -136,6 +136,7 @@ class Trade:
             "symbol": self.symbol,
             "side": self.side,
             "strategy": self.strategy,
+            "modules": strategies,
             "entry_price": self.entry_price,
             "quantity": self.quantity,
             "opened_at": self.opened_at.isoformat(),

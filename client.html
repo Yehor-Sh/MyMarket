@@ -1198,7 +1198,45 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function formatClusterStrategies(value) {
     if (!Array.isArray(value) || value.length === 0) return '';
-    return value.join('|');
+    return value
+      .map((item) => String(item || '').trim())
+      .filter((item) => item.length > 0)
+      .join(' · ');
+  }
+
+  function deriveTradeModules(trade, metadata) {
+    const result = [];
+    const append = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(append);
+        return;
+      }
+      if (value === undefined || value === null) return;
+      const text = String(value).trim();
+      if (!text || text === '—') return;
+      if (!result.includes(text)) {
+        result.push(text);
+      }
+    };
+
+    const primarySources = [trade && trade.modules, metadata && metadata.strategies];
+    for (const source of primarySources) {
+      if (Array.isArray(source) && source.length) {
+        source.forEach(append);
+      }
+      if (result.length) {
+        break;
+      }
+    }
+
+    if (!result.length) {
+      append(trade && trade.primary_strategy);
+      append(trade && trade.strategy);
+      append(trade && trade.module);
+      append(trade && trade.abcde);
+    }
+
+    return result;
   }
 
   function formatMetadata(value) {
@@ -1285,12 +1323,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const metadata =
         trade.metadata && typeof trade.metadata === 'object' ? trade.metadata : {};
       const factorInfo = extractFactorInfo(metadata);
+      const modules = deriveTradeModules(trade, metadata);
+      const moduleLabel = modules.length
+        ? modules.join(' · ')
+        : (trade.module || trade.strategy || trade.abcde || '').toString().trim() || '—';
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
         id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
-        module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
+        module: moduleLabel,
+        modules,
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         profit: profit !== undefined && profit !== null ? Number(profit) : null,
@@ -1311,12 +1354,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const metadata =
         trade.metadata && typeof trade.metadata === 'object' ? trade.metadata : {};
       const factorInfo = extractFactorInfo(metadata);
+      const modules = deriveTradeModules(trade, metadata);
+      const moduleLabel = modules.length
+        ? modules.join(' · ')
+        : (trade.module || trade.strategy || trade.abcde || '').toString().trim() || '—';
 
       return {
         trade_id: tradeId ? String(tradeId) : '',
         symbol: trade.symbol,
-        module: (trade.module || trade.strategy || trade.abcde || '—').toString().trim(),
-        strategy: (trade.strategy || trade.module || trade.abcde || '').toString().trim(),
+        module: moduleLabel,
+        modules,
+        strategy: modules.length ? modules[0] : (trade.strategy || trade.module || trade.abcde || '').toString().trim(),
         direction: (trade.direction || trade.side || '').toUpperCase(),
         entry_price: trade.entry_price,
         exit_price: trade.exit_price,

@@ -115,6 +115,18 @@ def test_signal_passes_with_missing_factor_data(monkeypatch: pytest.MonkeyPatch)
 
     orchestrator.client.prime_price(symbol, 100.0)
 
+    def _false_check_global(signal, candles, context):
+        return False
+
+    orchestrator.multi_factor_engine._factors = [
+        (
+            _false_check_global
+            if getattr(factor, "__name__", "") == "check_global"
+            else factor
+        )
+        for factor in orchestrator.multi_factor_engine._factors
+    ]
+
     assert "VWTC4H" in orchestrator.strategies
     strategy = orchestrator.strategies["VWTC4H"]
     signal = strategy.make_signal(symbol, "LONG")
@@ -132,13 +144,15 @@ def test_signal_passes_with_missing_factor_data(monkeypatch: pytest.MonkeyPatch)
 
     metadata = validated[0].metadata
     assert metadata["factors_total"] == 1
-    assert metadata["factors_required"] == 1
-    assert metadata["factors_passed"] == ["check_global"]
+    assert metadata["factors_required"] == 0
+    assert metadata["factors_passed"] == []
+    assert metadata["factors_requirement_relaxed"] is True
 
     orchestrator._handle_signal(validated[0])
     assert orchestrator.active_trades, "trade should have been created"
     trade = next(iter(orchestrator.active_trades.values()))
     assert trade.metadata["factors_total"] == 1
-    assert trade.metadata["factors_required"] == 1
-    assert trade.metadata["factors_passed"] == ["check_global"]
+    assert trade.metadata["factors_required"] == 0
+    assert trade.metadata["factors_passed"] == []
+    assert trade.metadata["factors_requirement_relaxed"] is True
 

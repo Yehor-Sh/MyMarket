@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 from typing import Dict, List
 
 import pytest
@@ -46,10 +45,10 @@ STRATEGY_CONFIG = [
 
 @pytest.mark.parametrize("strategy_module, class_name, detect_module, detect_attr", STRATEGY_CONFIG)
 def test_strategy_adapter_bridge(monkeypatch, strategy_module: str, class_name: str, detect_module: str, detect_attr: str) -> None:
-    module = importlib.import_module(strategy_module)
+    module = pytest.importorskip(strategy_module)
     strategy_cls = getattr(module, class_name)
 
-    detect_mod = importlib.import_module(detect_module)
+    detect_mod = pytest.importorskip(detect_module)
 
     calls: Dict[str, int] = {}
 

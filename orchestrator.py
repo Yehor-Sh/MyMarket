@@ -21,6 +21,25 @@ from flask_socketio import SocketIO, emit
 
 from binance_client import BinanceClient
 from module_base import ModuleBase, Signal
+from modules.cluster_engine import ClusterEngine
+
+
+def _normalise_strategies(
+    metadata: Optional[Dict[str, object]], fallback: Optional[str]
+) -> List[str]:
+    if metadata is None:
+        strategies: Iterable[str] = []
+    else:
+        raw = metadata.get("strategies") if isinstance(metadata, dict) else None
+        if isinstance(raw, list):
+            strategies = [str(item).upper() for item in raw if item]
+        else:
+            strategies = []
+    if not strategies and fallback:
+        return [fallback.upper()]
+    if not strategies:
+        return []
+    return sorted({strategy.upper() for strategy in strategies})
 from module_worker import ModuleHealth, ModuleWorker
 
 
@@ -44,7 +63,7 @@ class Trade:
     initial_stop: float
     high_watermark: float
     low_watermark: float
-    metadata: Dict[str, float] = field(default_factory=dict)
+    metadata: Dict[str, object] = field(default_factory=dict)
     confidence: float = 1.0
     current_price: Optional[float] = None
     max_profit_pct: float = 0.0
@@ -107,6 +126,10 @@ class Trade:
         self.is_active = False
 
     def to_dict(self) -> Dict[str, object]:
+        metadata = dict(self.metadata)
+        strategies = _normalise_strategies(metadata, self.strategy)
+        metadata.setdefault("strategies", strategies)
+        metadata.setdefault("cluster_size", len(strategies))
         return {
             "id": self.trade_id,
             "symbol": self.symbol,
@@ -117,7 +140,7 @@ class Trade:
             "opened_at": self.opened_at.isoformat(),
             "trailing_stop": self.trailing_stop,
             "confidence": self.confidence,
-            "metadata": self.metadata,
+            "metadata": metadata,
             "current_price": self.current_price,
             "current_profit_pct": self.current_profit_pct,
             "current_profit": self.current_profit_pct,
@@ -129,6 +152,8 @@ class Trade:
             if self.profit_pct is not None
             else self.current_profit_pct,
             "status": "active" if self.is_active else "closed",
+            "cluster_size": metadata.get("cluster_size"),
+            "cluster_strategies": metadata.get("strategies"),
         }
 
     def _calculate_profit_pct(self, price: float) -> float:
@@ -153,7 +178,8 @@ class Orchestrator:
         max_tracked_symbols: int = 200,
         trend_mode: str = "global",       # <--- добавил
         trend_interval: str = "1m",       # <--- добавил
-        trend_lookback: int = 20
+        trend_lookback: int = 20,
+        cluster_threshold: int = 3,
     ) -> None:
         self.client = BinanceClient()
         self.app = Flask(__name__)
@@ -166,7 +192,7 @@ class Orchestrator:
         self.active_trades: Dict[str, Trade] = {}
         self.closed_trades: List[Trade] = []
         self._symbol_index: Dict[str, set[str]] = defaultdict(set)
-        self._duplicate_guard: Dict[Tuple[str, str, str], str] = {}
+        self._duplicate_guard: Dict[Tuple[str, str, Tuple[str, ...]], str] = {}
         self._lock = threading.RLock()
 
         self.signal_queue: "queue.Queue[Signal]" = queue.Queue()
@@ -182,6 +208,8 @@ class Orchestrator:
             self.strategies[key] for key in sorted(self.strategies)
         ]
         self.workers: List[ModuleWorker] = []
+
+        self.cluster_engine = ClusterEngine(cluster_threshold)
 
         self.client.add_price_listener(self._handle_price_update)
         self._register_routes()
@@ -376,12 +404,21 @@ class Orchestrator:
                 signal = self.signal_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            self._handle_signal(signal)
+            raw_signals = [signal]
+            while True:
+                try:
+                    raw_signals.append(self.signal_queue.get_nowait())
+                except queue.Empty:
+                    break
+            clustered = self.cluster_engine.process_signals(raw_signals)
+            for clustered_signal in clustered:
+                self._handle_signal(clustered_signal)
 
     # ------------------------------------------------------------------
     def _handle_signal(self, signal: Signal) -> None:
         symbol = signal.symbol.upper()
-        key = (symbol, signal.side, signal.strategy)
+        strategies = _normalise_strategies(signal.metadata, signal.strategy)
+        key = (symbol, signal.side, tuple(strategies))
         allowed_symbols = set(self._symbols_provider())
         with self._lock:
             if key in self._duplicate_guard:
@@ -394,7 +431,8 @@ class Orchestrator:
             if candles:
                 price = candles[-1].close
         if price is None:
-            module = self.strategies.get(signal.strategy.upper())
+            primary_strategy = strategies[0] if strategies else signal.strategy
+            module = self.strategies.get(primary_strategy.upper())
             if module is not None:
                 cached_candles = self.client.get_cached_klines(symbol, module.interval)
                 if cached_candles:
@@ -405,6 +443,9 @@ class Orchestrator:
         self.client.subscribe_ticker([symbol])
 
         initial_stop = self._initial_stop(price, signal.side)
+        metadata = dict(signal.metadata)
+        metadata.setdefault("strategies", strategies)
+        metadata.setdefault("cluster_size", len(strategies))
         trade = Trade(
             trade_id=str(uuid.uuid4()),
             symbol=symbol,
@@ -418,7 +459,7 @@ class Orchestrator:
             initial_stop=initial_stop,
             high_watermark=price,
             low_watermark=price,
-            metadata=signal.metadata,
+            metadata=metadata,
             confidence=signal.confidence,
             current_price=price,
         )
@@ -484,7 +525,8 @@ class Orchestrator:
         symbol_trades.discard(trade.trade_id)
         if not symbol_trades:
             self._symbol_index.pop(trade.symbol, None)
-        key = (trade.symbol, trade.side, trade.strategy)
+        strategies = _normalise_strategies(trade.metadata, trade.strategy)
+        key = (trade.symbol, trade.side, tuple(strategies))
         self._duplicate_guard.pop(key, None)
         self.closed_trades.append(trade)
         if len(self.closed_trades) > self.max_closed_trades:
@@ -542,6 +584,7 @@ class Orchestrator:
             "server_time": datetime.now().astimezone().isoformat(),
             "context": context,
         }
+
 
     # ------------------------------------------------------------------
     def get_modules_health(self) -> List[Dict[str, object]]:

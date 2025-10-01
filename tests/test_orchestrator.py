@@ -156,3 +156,50 @@ def test_signal_passes_with_missing_factor_data(monkeypatch: pytest.MonkeyPatch)
     assert trade.metadata["factors_passed"] == []
     assert trade.metadata["factors_requirement_relaxed"] is True
 
+
+def test_signal_validated_when_global_factor_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    symbol = "SOLUSDT"
+    orchestrator = Orchestrator(cluster_threshold=1, factor_min_pass=3)
+
+    monkeypatch.setattr(orchestrator, "_broadcast_state", lambda: {})
+    monkeypatch.setattr(orchestrator.socketio, "emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator.client, "subscribe_ticker", lambda symbols: None)
+    monkeypatch.setattr(orchestrator.client, "subscribe_klines", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator.client, "get_liquid_pairs", lambda force_refresh=False: [symbol])
+
+    def _fake_snapshot(symbols):
+        return {
+            "BTCUSDT": {"price": 20_000.0, "percent_change": -2.5},
+            "ETHUSDT": {"price": 1_200.0, "percent_change": -1.5},
+        }
+
+    monkeypatch.setattr(orchestrator.client, "get_market_snapshot", _fake_snapshot)
+
+    fetch_calls: List[Tuple[str, str, int]] = []
+
+    def _fake_fetch(symbol_arg: str, interval: str, limit: int = 100) -> List[Kline]:
+        fetch_calls.append((symbol_arg.upper(), interval, limit))
+        return []
+
+    monkeypatch.setattr(orchestrator.client, "fetch_klines", _fake_fetch)
+
+    strategy = orchestrator.strategies["VWTC4H"]
+    signal = strategy.make_signal(symbol, "LONG")
+
+    clustered = orchestrator.cluster_engine.process_signals([signal])
+    assert clustered, "clustered signal should be produced when threshold is 1"
+    cluster_signal = clustered[0]
+
+    candles, context = orchestrator._prepare_factor_inputs([cluster_signal])
+    assert candles[symbol] == []
+    assert (symbol, "1h", 120) in fetch_calls
+
+    validated = orchestrator.multi_factor_engine.validate([cluster_signal], candles, context)
+    assert validated, "signal should pass when requirements are relaxed"
+
+    metadata = validated[0].metadata
+    assert metadata["factors_total"] == 1
+    assert metadata["factors_required"] == 0
+    assert metadata["factors_passed"] == []
+    assert metadata["factors_requirement_relaxed"] is True
+    assert metadata["factors_score"] == 0

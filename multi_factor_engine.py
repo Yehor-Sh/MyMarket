@@ -9,7 +9,9 @@ from typing import Callable, Dict, Iterable, List, Sequence
 from binance_client import Kline
 from module_base import Signal
 
-FactorCallable = Callable[[Signal, Sequence[Kline] | None, Dict[str, object]], bool]
+FactorCallable = Callable[
+    [Signal, Sequence[Kline] | None, Dict[str, object]], bool | None
+]
 
 _logger = logging.getLogger(__name__)
 
@@ -67,21 +69,25 @@ def calculate_rsi(candles: Sequence[Kline], period: int = 14) -> float:
     return 100.0 - (100.0 / (1 + rs))
 
 
-def check_trend(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]) -> bool:
+def check_trend(
+    signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]
+) -> bool | None:
     if not candles or len(candles) < 5:
-        return False
+        return None
     closes = [candle.close for candle in candles[-20:]]
     if len(closes) < 2:
-        return False
+        return None
     slope = closes[-1] - closes[0]
     if abs(slope) < 1e-8:
         return False
     return slope > 0 if signal.side == "LONG" else slope < 0
 
 
-def check_volume(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]) -> bool:
+def check_volume(
+    signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]
+) -> bool | None:
     if not candles or len(candles) < 21:
-        return False
+        return None
     lookback = candles[-21:-1]
     average_volume = mean(candle.volume for candle in lookback) if lookback else 0.0
     last_volume = candles[-1].volume
@@ -90,9 +96,11 @@ def check_volume(signal: Signal, candles: Sequence[Kline] | None, context: Dict[
     return last_volume >= average_volume * 1.2
 
 
-def check_atr(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]) -> bool:
-    if not candles:
-        return False
+def check_atr(
+    signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]
+) -> bool | None:
+    if not candles or len(candles) < 2:
+        return None
     atr = calculate_atr(candles, period=min(14, len(candles) - 1))
     if atr <= 0:
         return False
@@ -102,9 +110,11 @@ def check_atr(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str
     return atr / price >= 0.003
 
 
-def check_levels(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]) -> bool:
+def check_levels(
+    signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]
+) -> bool | None:
     if not candles or len(candles) < 10:
-        return False
+        return None
     window = candles[-50:] if len(candles) > 50 else candles
     last_close = window[-1].close
     atr = calculate_atr(window, period=min(14, len(window) - 1))
@@ -118,9 +128,11 @@ def check_levels(signal: Signal, candles: Sequence[Kline] | None, context: Dict[
     return abs(resistance - last_close) <= tolerance
 
 
-def check_rsi(signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]) -> bool:
+def check_rsi(
+    signal: Signal, candles: Sequence[Kline] | None, context: Dict[str, object]
+) -> bool | None:
     if not candles or len(candles) < 15:
-        return False
+        return None
     rsi = calculate_rsi(candles, period=min(14, len(candles) - 1))
     if signal.side == "LONG":
         return rsi < 70
@@ -187,19 +199,22 @@ class MultiFactorEngine:
         context: Dict[str, object] | None,
     ) -> List[Signal]:
         validated: List[Signal] = []
-        total = len(self._factors)
-        required_default = min(self.min_pass, total) if total else 0
         candle_map = candles or {}
         context_map: Dict[str, object] = context or {}
         for signal in signals:
             symbol = signal.symbol.upper()
             symbol_candles = candle_map.get(symbol, [])
             passed: List[str] = []
-            if total:
+            available = 0
+            if self._factors:
                 for factor in self._factors:
                     name = _factor_name(factor)
                     try:
-                        if factor(signal, symbol_candles, context_map):
+                        result = factor(signal, symbol_candles, context_map)
+                        if result is None:
+                            continue
+                        available += 1
+                        if result:
                             passed.append(name)
                     except Exception:  # pragma: no cover - defensive
                         _logger.exception(
@@ -208,18 +223,18 @@ class MultiFactorEngine:
             if passed:
                 passed = list(dict.fromkeys(passed))
             score = len(passed)
-            required = required_default if total else 0
+            required = min(self.min_pass, available) if available else 0
             metadata = dict(signal.metadata)
             metadata.update(
                 {
                     "factors_passed": passed,
-                    "factors_total": total,
+                    "factors_total": available,
                     "factors_required": required,
                     "factors_score": score,
-                    "factors_ratio": (score / total) if total else 1.0,
+                    "factors_ratio": (score / available) if available else 1.0,
                 }
             )
-            if total and score < required:
+            if available and score < required:
                 continue
             validated.append(
                 Signal(

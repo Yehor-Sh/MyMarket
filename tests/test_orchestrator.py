@@ -89,3 +89,56 @@ def test_handle_signal_uses_primary_interval_cache(monkeypatch: pytest.MonkeyPat
     assert trade.metadata["strategies"] == [strategy.abbreviation]
     assert trade.entry_price == pytest.approx(candles[-1].close)
 
+
+def test_signal_passes_with_missing_factor_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    symbol = "SOLUSDT"
+    orchestrator = Orchestrator(cluster_threshold=1, factor_min_pass=2)
+
+    monkeypatch.setattr(orchestrator, "_broadcast_state", lambda: {})
+    monkeypatch.setattr(orchestrator.socketio, "emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator.client, "subscribe_ticker", lambda symbols: None)
+    monkeypatch.setattr(orchestrator.client, "subscribe_klines", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator.client, "get_market_snapshot", lambda symbols: {})
+    monkeypatch.setattr(
+        orchestrator.client,
+        "get_liquid_pairs",
+        lambda force_refresh=False: [symbol, "BTCUSDT", "ETHUSDT"],
+    )
+
+    fetch_calls: List[Tuple[str, str, int]] = []
+
+    def _fake_fetch(symbol_arg: str, interval: str, limit: int = 100) -> List[Kline]:
+        fetch_calls.append((symbol_arg.upper(), interval, limit))
+        return []
+
+    monkeypatch.setattr(orchestrator.client, "fetch_klines", _fake_fetch)
+
+    orchestrator.client.prime_price(symbol, 100.0)
+
+    assert "VWTC4H" in orchestrator.strategies
+    strategy = orchestrator.strategies["VWTC4H"]
+    signal = strategy.make_signal(symbol, "LONG")
+
+    clustered = orchestrator.cluster_engine.process_signals([signal])
+    assert clustered, "clustered signal should be produced when threshold is 1"
+    cluster_signal = clustered[0]
+
+    candles, context = orchestrator._prepare_factor_inputs([cluster_signal])
+    assert candles[symbol] == []
+    assert (symbol, "1h", 120) in fetch_calls
+
+    validated = orchestrator.multi_factor_engine.validate([cluster_signal], candles, context)
+    assert validated, "signal should not be filtered out when factor data is missing"
+
+    metadata = validated[0].metadata
+    assert metadata["factors_total"] == 1
+    assert metadata["factors_required"] == 1
+    assert metadata["factors_passed"] == ["check_global"]
+
+    orchestrator._handle_signal(validated[0])
+    assert orchestrator.active_trades, "trade should have been created"
+    trade = next(iter(orchestrator.active_trades.values()))
+    assert trade.metadata["factors_total"] == 1
+    assert trade.metadata["factors_required"] == 1
+    assert trade.metadata["factors_passed"] == ["check_global"]
+

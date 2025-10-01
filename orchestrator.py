@@ -410,11 +410,13 @@ class Orchestrator:
         candle_map: Dict[str, Sequence[Kline]] = {}
         for symbol in symbols:
             cached = self.client.get_cached_klines(symbol, "1h")
-            if not cached:
+            if len(cached) < 120:
                 try:
-                    cached = self.client.fetch_klines(symbol, "1h", 120)
+                    self.client.fetch_klines(symbol, "1h", 120)
                 except Exception:  # pragma: no cover - defensive fallback
                     cached = []
+                else:
+                    cached = self.client.get_cached_klines(symbol, "1h")
             candle_map[symbol] = cached
         self._refresh_market_context()
         with self._context_lock:
@@ -462,7 +464,13 @@ class Orchestrator:
             return
         price = self.client.get_price(symbol)
         if price is None:
-            candles = self.client.fetch_klines(symbol, "1m", 1)
+            candles: Sequence[Kline] = []
+            try:
+                self.client.fetch_klines(symbol, "1m", 1)
+            except Exception:  # pragma: no cover - defensive fallback
+                candles = self.client.get_cached_klines(symbol, "1m")
+            else:
+                candles = self.client.get_cached_klines(symbol, "1m")
             if candles:
                 price = candles[-1].close
         if price is None:
@@ -587,7 +595,13 @@ class Orchestrator:
             if price is None:
                 price = self.client.get_price(trade.symbol)
             if price is None:
-                candles = self.client.fetch_klines(trade.symbol, "1m", 1)
+                candles: Sequence[Kline] = []
+                try:
+                    self.client.fetch_klines(trade.symbol, "1m", 1)
+                except Exception:  # pragma: no cover - defensive fallback
+                    candles = self.client.get_cached_klines(trade.symbol, "1m")
+                else:
+                    candles = self.client.get_cached_klines(trade.symbol, "1m")
                 if candles:
                     price = candles[-1].close
             if price is None:
@@ -674,8 +688,15 @@ class Orchestrator:
         else:  # локальный режим
             for symbol in MARKET_CONTEXT_SYMBOLS:
                 try:
-                    candles = self.client.fetch_klines(symbol, self.trend_interval, self.trend_lookback)
-                    if not candles:
+                    candles = self.client.get_cached_klines(symbol, self.trend_interval)
+                    if len(candles) < self.trend_lookback:
+                        self.client.fetch_klines(
+                            symbol, self.trend_interval, self.trend_lookback
+                        )
+                        candles = self.client.get_cached_klines(
+                            symbol, self.trend_interval
+                        )
+                    if len(candles) < self.trend_lookback:
                         continue
                     last_close = candles[-1].close
                     first_close = candles[0].close

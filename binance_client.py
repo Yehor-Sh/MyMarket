@@ -154,6 +154,7 @@ class BinanceClient:
         self._last_liquidity_refresh: float = 0.0
 
         self._subscribed_symbols: Set[str] = set()
+        self._kline_subscriptions: Set[Tuple[str, str]] = set()
         self._subscription_lock = threading.RLock()
         self._price_callbacks: List[Callable[[str, float], None]] = []
         self._callbacks_lock = threading.RLock()
@@ -259,7 +260,23 @@ class BinanceClient:
             if not new_symbols:
                 return
             self._subscribed_symbols.update(new_symbols)
-        self._queue_ws_subscription(new_symbols)
+        streams = [f"{symbol.lower()}@miniTicker" for symbol in new_symbols]
+        self._queue_ws_subscription(streams)
+
+    def subscribe_klines(self, symbol: str, interval: str) -> None:
+        """Subscribe to kline updates for ``symbol``/``interval``."""
+
+        normalized_symbol = symbol.upper()
+        normalized_interval = str(interval)
+        if not normalized_symbol or not normalized_interval:
+            return
+        key = (normalized_symbol, normalized_interval)
+        with self._subscription_lock:
+            if key in self._kline_subscriptions:
+                return
+            self._kline_subscriptions.add(key)
+        stream = f"{normalized_symbol.lower()}@kline_{normalized_interval}"
+        self._queue_ws_subscription([stream])
 
     def add_price_listener(self, callback: Callable[[str, float], None]) -> None:
         """Register a callback invoked whenever a ticker update is available."""
@@ -291,7 +308,8 @@ class BinanceClient:
             with self._klines_lock:
                 self._klines_cache[key] = klines
             self.subscribe_ticker([symbol.upper()])
-            return klines
+            self.subscribe_klines(symbol, interval)
+            return self.get_cached_klines(symbol, interval)
         except Exception as exc:  # pragma: no cover - network failure fallback
             _logger.warning("Failed to fetch klines for %s: %s", symbol, exc)
             with self._klines_lock:
@@ -538,13 +556,12 @@ class BinanceClient:
         return chunk_payload, skipped
 
 
-    def _queue_ws_subscription(self, symbols: Iterable[str]) -> None:
-        if not symbols:
+    def _queue_ws_subscription(self, streams: Iterable[str]) -> None:
+        if not streams:
             return
         with self._ws_lock:
             added = False
-            for symbol in symbols:
-                stream = f"{symbol.lower()}@miniTicker"
+            for stream in streams:
                 if stream not in self._ws_streams:
                     self._ws_streams.add(stream)
                     self._enqueue_pending_locked(stream)
@@ -655,6 +672,67 @@ class BinanceClient:
         self._process_ws_payload(payload)
 
     def _process_ws_payload(self, payload: Dict[str, object]) -> None:
+        kline_data = payload.get("k")
+        if isinstance(kline_data, dict):
+            symbol = (
+                kline_data.get("s")
+                or payload.get("s")
+                or payload.get("symbol")
+            )
+            interval = kline_data.get("i")
+            if not symbol or not interval:
+                return
+            try:
+                open_time = int(kline_data.get("t"))
+                close_time = int(kline_data.get("T"))
+                open_price = float(kline_data.get("o"))
+                high_price = float(kline_data.get("h"))
+                low_price = float(kline_data.get("l"))
+                close_price = float(kline_data.get("c"))
+                volume = float(kline_data.get("v"))
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                return
+            is_final = bool(kline_data.get("x"))
+            symbol_key = str(symbol).upper()
+            interval_key = str(interval)
+            incoming = Kline(
+                open_time=open_time,
+                open=open_price,
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                volume=volume,
+                close_time=close_time,
+            )
+            key = (symbol_key, interval_key)
+            with self._klines_lock:
+                cached = list(self._klines_cache.get(key, ()))
+                inserted = False
+                for index, existing in enumerate(cached):
+                    if existing.open_time == open_time:
+                        if not is_final:
+                            incoming = Kline(
+                                open_time=open_time,
+                                open=existing.open,
+                                high=max(existing.high, incoming.high),
+                                low=min(existing.low, incoming.low),
+                                close=incoming.close,
+                                volume=max(existing.volume, incoming.volume),
+                                close_time=incoming.close_time,
+                            )
+                        cached[index] = incoming
+                        inserted = True
+                        break
+                    if existing.open_time > open_time:
+                        cached.insert(index, incoming)
+                        inserted = True
+                        break
+                if not inserted:
+                    cached.append(incoming)
+                self._klines_cache[key] = cached
+            self._publish_price_update(symbol_key, incoming.close)
+            return
+
         symbol = payload.get("s") or payload.get("symbol")
         price_value = payload.get("c") or payload.get("p") or payload.get("price")
         if not symbol or price_value is None:

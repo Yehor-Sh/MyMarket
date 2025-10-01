@@ -86,29 +86,31 @@ class ModuleBase(ABC):
 
         results: List[Signal] = []
         for symbol in symbols:
-            try:
-                primary_candles = self.client.fetch_klines(
-                    symbol, self.interval, self.lookback
-                )
-            except Exception:  # pragma: no cover - defensive
-                _logger.exception("failed to fetch klines for %s", symbol)
-                continue
+            primary_candles = self.client.get_cached_klines(symbol, self.interval)
+            if len(primary_candles) < self.minimum_bars:
+                try:
+                    self.client.fetch_klines(symbol, self.interval, self.lookback)
+                except Exception:  # pragma: no cover - defensive
+                    _logger.exception("failed to fetch klines for %s", symbol)
+                    continue
+                primary_candles = self.client.get_cached_klines(symbol, self.interval)
             if len(primary_candles) < self.minimum_bars:
                 continue
 
             extra_candles: Dict[str, Sequence[Kline]] = {}
             missing_timeframe_data = False
             for extra_interval, extra_lookback in self.extra_timeframes.items():
-                try:
-                    candles = self.client.fetch_klines(
-                        symbol, extra_interval, extra_lookback
-                    )
-                except Exception:  # pragma: no cover - defensive
-                    _logger.exception(
-                        "failed to fetch %s klines for %s", extra_interval, symbol
-                    )
-                    missing_timeframe_data = True
-                    break
+                candles = self.client.get_cached_klines(symbol, extra_interval)
+                if len(candles) < extra_lookback:
+                    try:
+                        self.client.fetch_klines(symbol, extra_interval, extra_lookback)
+                    except Exception:  # pragma: no cover - defensive
+                        _logger.exception(
+                            "failed to fetch %s klines for %s", extra_interval, symbol
+                        )
+                        missing_timeframe_data = True
+                        break
+                    candles = self.client.get_cached_klines(symbol, extra_interval)
                 if len(candles) < extra_lookback:
                     missing_timeframe_data = True
                     break

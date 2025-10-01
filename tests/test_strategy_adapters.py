@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pytest
 
@@ -9,12 +9,13 @@ from binance_client import Kline
 
 class _FakeClient:
     def __init__(self) -> None:
-        self.calls: List[tuple[str, str, int]] = []
+        self.calls: List[Tuple[str, str, int]] = []
+        self.cache: Dict[Tuple[str, str], List[Kline]] = {}
 
     def fetch_klines(self, symbol: str, interval: str, lookback: int) -> List[Kline]:
         self.calls.append((symbol, interval, lookback))
         count = lookback + 5
-        return [
+        candles = [
             Kline(
                 open_time=index,
                 open=1.0,
@@ -26,6 +27,11 @@ class _FakeClient:
             )
             for index in range(count)
         ]
+        self.cache[(symbol, interval)] = candles
+        return candles
+
+    def get_cached_klines(self, symbol: str, interval: str) -> List[Kline]:
+        return list(self.cache.get((symbol, interval), []))
 
 
 STRATEGY_CONFIG = [

@@ -12,7 +12,7 @@ class ClusterEngine:
     """Aggregate raw strategy signals into cluster confirmations."""
 
     def __init__(self, min_cluster_size: int = 1) -> None:
-        if min_cluster_size < 1:
+        if min_cluster_size < 0:
             raise ValueError("min_cluster_size must be at least 1")
         self.min_cluster_size = int(min_cluster_size)
         self._pending: Dict[Tuple[str, str], Dict[str, Signal]] = defaultdict(dict)

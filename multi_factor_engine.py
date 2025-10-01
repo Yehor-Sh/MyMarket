@@ -223,7 +223,10 @@ class MultiFactorEngine:
             if passed:
                 passed = list(dict.fromkeys(passed))
             score = len(passed)
-            required = min(self.min_pass, available) if available else 0
+            relaxed_requirement = self.min_pass > 0 and available < self.min_pass
+            required = 0 if relaxed_requirement else (
+                min(self.min_pass, available) if available else 0
+            )
             metadata = dict(signal.metadata)
             metadata.update(
                 {
@@ -232,9 +235,10 @@ class MultiFactorEngine:
                     "factors_required": required,
                     "factors_score": score,
                     "factors_ratio": (score / available) if available else 1.0,
+                    "factors_requirement_relaxed": relaxed_requirement,
                 }
             )
-            if available and score < required:
+            if available and not relaxed_requirement and score < required:
                 continue
             validated.append(
                 Signal(

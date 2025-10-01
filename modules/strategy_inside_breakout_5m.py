@@ -14,6 +14,8 @@ def _is_bear(c: Kline) -> bool: return c.close < c.open
 def _conf(x, lo=0.55, hi=0.9):
     x = max(0.0, min(2.0, x)) / 2.0
     return lo + (hi - lo) * x
+def passes_sanity(meta, min_atr_pct=0.0, min_rel_vol=0.0):
+    return meta.get("atr_pct", 0) >= min_atr_pct and meta.get("rel_volume", 0) >= min_rel_vol
 
 class InsideBreakout5m(ModuleBase):
     class Cfg:

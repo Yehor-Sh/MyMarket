@@ -1,5 +1,5 @@
 import unittest
-from typing import Iterable, List
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from binance_client import Kline
 from module_base import ModuleBase, Signal
@@ -7,11 +7,13 @@ from module_base import ModuleBase, Signal
 
 class _DummyClient:
     def __init__(self) -> None:
-        self.calls: List[tuple[str, str, int]] = []
+        self.calls: List[Tuple[str, str, int]] = []
+        self.cache: Dict[Tuple[str, str], List[Kline]] = {}
+        self.override_close: Optional[float] = None
 
     def fetch_klines(self, symbol: str, interval: str, lookback: int) -> List[Kline]:
         self.calls.append((symbol, interval, lookback))
-        return [
+        candles = [
             Kline(
                 open_time=index,
                 open=1.0,
@@ -23,6 +25,23 @@ class _DummyClient:
             )
             for index in range(lookback)
         ]
+        cached = list(candles)
+        if cached and self.override_close is not None:
+            last = cached[-1]
+            cached[-1] = Kline(
+                open_time=last.open_time,
+                open=last.open,
+                high=last.high,
+                low=last.low,
+                close=self.override_close,
+                volume=last.volume,
+                close_time=last.close_time,
+            )
+        self.cache[(symbol, interval)] = cached
+        return candles
+
+    def get_cached_klines(self, symbol: str, interval: str) -> List[Kline]:
+        return list(self.cache.get((symbol, interval), []))
 
 
 class _TestModule(ModuleBase):
@@ -72,6 +91,24 @@ class ModuleBaseTests(unittest.TestCase):
             [("ETHUSDT", "1m", 3), ("ETHUSDT", "1h", 2)],
         )
         self.assertEqual(len(module.process_calls), 1)
+
+    def test_module_uses_cached_candles(self) -> None:
+        client = _DummyClient()
+        client.override_close = 42.5
+        module = _TestModule(
+            client,
+            name="Test",
+            abbreviation="TST",
+            interval="1m",
+            lookback=3,
+        )
+
+        module.get_signals(["BTCUSDT"])
+
+        self.assertTrue(module.process_calls)
+        symbol, candles = module.process_calls[0]
+        self.assertEqual(symbol, "BTCUSDT")
+        self.assertEqual(candles[-1].close, 42.5)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution helper
